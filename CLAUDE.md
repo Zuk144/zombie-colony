@@ -32,7 +32,14 @@ planned for Phase 3). It's built for iPad first.
   browsers heuristically cache ES modules, and edits silently don't load (this happened).
   `ruby tools/serve.rb --lan` makes it reachable from an iPad on the same Wi-Fi and prints
   the URL. Add to Home Screen for full-screen PWA mode.
-- **Hosted test build (for iPad):** the game is published as a private claude.ai Artifact at
+- **Git + hosting:** this folder is its own git repo, pushed to **github.com/Zuk144/zombie-colony**
+  (public, over SSH like `pet-game`). **GitHub Pages serves `main` at
+  https://zuk144.github.io/zombie-colony/**, so every `git push` to `main` redeploys (about a
+  minute). `.nojekyll` makes Pages serve the files as-is. Pages caches files for about 10 minutes,
+  so right after a deploy a device can briefly mix old and new modules. If the iPad acts
+  strangely after an update, wait a few minutes and reload. Commit or push only when the user
+  asks.
+- **Hosted test build (claude.ai, secondary):** also published as a private claude.ai Artifact at
   https://claude.ai/artifact/FFNUUrWf83Hhwz8ybhZN9y. To update it, run
   `python3 tools/artifact_page.py <scratchpad>/index.html` (this strips the doc wrapper, since
   Artifacts supply their own), then publish that file with `root` = this folder, `files` =
