@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Holdout">
+<meta name="theme-color" content="#16181c">
+<title>Holdout</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="view"></canvas>
+
+<header id="hud">
+  <div class="hud-group">
+    <div id="clock" class="pill"></div>
+    <div id="speeds" class="seg"></div>
+  </div>
+  <div id="roster"></div>
+  <div class="hud-group right">
+    <button id="threat" class="pill danger" hidden></button>
+    <button id="alarm" class="pill" aria-label="Alarm"></button>
+    <div id="stats" class="pill"></div>
+    <button id="menuBtn" class="round" aria-label="Menu"></button>
+  </div>
+</header>
+
+<div id="letters"></div>
+<aside id="inspector" class="panel" hidden></aside>
+
+<div id="bottom">
+  <div id="toolChip" hidden>
+    <button class="tc-icon" aria-label="Show tools"></button>
+    <div class="tc-text"><b id="toolName"></b><small id="toolHint"></small></div>
+    <button id="toolDone">Done</button>
+  </div>
+  <div id="tray" hidden></div>
+  <nav id="dock"></nav>
+</div>
+
+<div id="workSheet" class="sheet" hidden></div>
+<div id="menuSheet" class="sheet" hidden></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
