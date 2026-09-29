@@ -70,6 +70,9 @@ planned for Phase 3). It's built for iPad first.
 | `path.js` | A* with a pluggable cost function and rect goals (`touch` = end adjacent to a footprint) |
 | `mapgen.js` | Terrain noise, roads, ruined buildings with loot, wrecked cars, vegetation, starting zombies |
 | `zones.js` | Stockpiles (5 priorities and a filter; corpses excluded by default), grow zones, **shelter zones** |
+| `rooms.js` | **Rooms and roofs**: 4-connected rooms bounded by walls, doors, and rock (not barricades); roles; impressiveness; roof support (6 cells) and collapse; auto-roof targets and roof areas; natural roofs from mining; `tempAt` |
+| `climate.js` | **Seasons and temperature**: outdoor curve plus day/night plus weather; room heat loss and heating; hypothermia and heatstroke (RW formulas); spoilage; frost; `growingSeason`; zombie cold slowdown |
+| `buildings.js` | **Per-building tick hook**: fuel burn, lit/heat state, heat per room. Phase 3 machines (power, production, noise) plug in here |
 | `pawn.js` | Survivor, zombie, and looter factories; needs; skills; `canFight`, `traitMult` |
 | `mood.js` | Thoughts (situational and memory, stacking), mood drift, break thresholds and rolls, catharsis |
 | `jobs.js` | **Job runner and job drivers** (toils + reserve + failIf): haul, deliver, build, repair, rearm, salvage, mine, cut, sow, bill (any recipe), equip, ammo, guard, shelter, eat, sleep, joy, mental states, leave or steal. Also carrying a downed pawn (`carryingPawn`/`carriedBy`) and `claimBed` |
@@ -79,7 +82,7 @@ planned for Phase 3). It's built for iPad first.
 | `medical.js` | **Health over time** (bleeding, healing, the **infection-vs-immunity race**), tend quality (skill × medicine), patient, tend, and rescue jobs |
 | `save.js` | Serialize and deserialize the world (JSON, Sets → arrays, derived state rebuilt, jobs dropped), localStorage slots (`auto`, `manual`) |
 | `director.js` | The Director: scripted intro (walker day 1, pack day 3), Cassandra threat cycle → hordes, strays (more at night), misc events, survivors joining |
-| `sim.js` | `tickWorld` (field rebuild, zombies and pawns each tick; plants and corpses every rare tick; Director every 1,000) and the starting scenario |
+| `sim.js` | `tickWorld` (field rebuild, zombies and pawns each tick; every rare tick climate, buildings, plants, frost, rot, and corpses; Director every 1,000) and the starting scenario |
 
 **Presentation**
 | File | Owns |
@@ -130,6 +133,11 @@ planned for Phase 3). It's built for iPad first.
   salvageable.
 - **Recipe or bench:** add to `RECIPES` (`workType` picks the Work column that does it) and
   list it in a bench's `recipes`. `defaultBill` auto-adds it when the bench is built.
+- **Heater or fuel user:** `fuel: { capacity, perDay }` gets refueling, lit state, and fuel UI
+  automatically. `heat` + `heatTarget` warm its room. `idleWhenWarm` saves fuel.
+- **Multi-cell or rotatable building:** `size: [w, h]` (+ `rotatable: true`). The Build tool
+  switches to footprint placement with the ↻ button; blueprints and the built thing carry
+  `sw`/`sh`.
 - **Weapon:** an item with `stack: 1` and `weapon: { melee | ranged, damage, cooldown, rank,
   range?, accuracy?, noise? }`. Survivors auto-equip higher `rank`s (ranged only counts if
   ammo exists).
@@ -160,6 +168,16 @@ planned for Phase 3). It's built for iPad first.
   value (sowing's `onDone` returns the new plant, which once caused an infinite spawn).
 - `p.inBed` (a bed id) means "lying in a bed" for healing and immunity. It's cleared by
   `startJob`/`endJob`. A rescued downed pawn keeps it because they have no job.
+- **Rooms rebuild** (`w.roomsDirty`) whenever something with `blocks && !seeThrough` or a
+  `door` spawns or despawns. Room objects are replaced on rebuild, so don't hold onto them; the
+  UI re-finds a selected room by its first cell. Room temperatures carry over through rebuilds
+  and saves.
+- **Plants grow only under open sky** and when it's warm (`plantGrowthFactor`). **Sowing waits for
+  the growing season** (`growingSeason` uses the day's average, not the hour, or growers sow on
+  mild winter afternoons and frost kills everything that night).
+- **Spoilage** (`t.rot`, in days at full rate) rides through hauling via `p.carrying.props.rot`
+  and averages when stacks merge. Refueling moves **whole logs** only (fractional fuel once
+  leaked fractional wood counts).
 - **Saves drop object references:** `job`, `move`, `threat`, `heard`, `carryingPawn`, and
   `carriedBy` aren't saved (everyone re-thinks on load), and `w.fx` is transient. Anything new
   that points at another object needs an id instead, or it won't survive a save.
@@ -192,5 +210,13 @@ colonies routinely reach day 16 against the Director's real hordes (3–6 by day
 horde of 50 on day 10 still wipes 4–5 survivors. Infection: untreated, 4 of 4 died; with a
 doctor, medkits, and a bed, 4 of 4 recovered.
 
-**Next:** Phase 2b (rooms and roofs, temperature and seasons), then Phase 3 automation (a
-handful of machines; `docs/DESIGN.md` §9). Name still undecided.
+**Phase 2b (done):** rooms and roofs (auto-roofing, roof areas, support and collapse, rock
+roofs), seasons and day/night temperature, cold snaps and heat waves, heating (wood stove,
+campfire) and fuel, hypothermia and heatstroke, seasonal crops and frost, spoilage, zombie cold
+slowdown, room thoughts (bedroom, dining, barracks, slept outside or in the cold, cramped),
+multi-cell rotatable placement, and the rooms overlay. Sim cost is about 0.5 s of CPU per game
+day for a 4-survivor defended base.
+
+**Next: Phase 3 automation**, a handful of machines. The spec, what 2b already prepared, the
+remaining engine work (including per-kind indexes to make `findWork` cheaper), and the
+milestones are in `docs/DESIGN.md` §9. Name still undecided.

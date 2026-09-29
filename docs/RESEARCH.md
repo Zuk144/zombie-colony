@@ -99,12 +99,34 @@ What the player controls:
 - Work speed rises with skill level (the wiki gives construction as 50% + 15%/level). We use
   one general formula for now.
 
-## Rooms (not implemented; roadmap)
+## Rooms (implemented in Phase 2b, simplified)
 
 A room is any area fully enclosed by walls, doors, or rock. Its stats are wealth, beauty,
 space, and cleanliness, which combine into **impressiveness** (the lowest stat counts most).
 Impressiveness gives mood thoughts: bedroom, dining room, barracks, −2 up to +8. Room roles
 come from the furniture inside.
+
+## Temperature, roofs, and spoilage (implemented in Phase 2b)
+
+- **Rooms and temperature (RW):** a room that's less than 75% roofed stays at the outdoor
+  temperature. Enclosed, roofed rooms keep their own temperature and equalize with outdoors
+  slowly, through thin roofs and walls; bigger and squarer rooms hold temperature better.
+  Heaters target 21°C by default.
+- **Comfort (RW):** baseline humans are comfortable at 16–26°C, and clothing widens that. We
+  assume ordinary clothes, 8–28°C.
+- **Hypothermia and heatstroke (RW):** they start 10°C past the comfortable range. Severity
+  rises per 60 ticks by `max(0.00075, (degrees − 10) × 0.0000645)`, about 32 hours to 100% right
+  at the threshold. Recovery is `max(0.0015, min(0.015, 0.027 × severity))` per 60 ticks. Stages:
+  mild > 0.04, minor > 0.20, serious > 0.35, extreme > 0.62, dead at 1.0.
+- **Roofs (RW):** enclosed rooms get build-roof designations automatically, at 65 ticks per
+  tile, 3×3 per job. A roof needs a wall or other support within 6 tiles. An unsupported roof
+  collapses (15–30 damage for a thin roof). Roofs block sunlight, so plants need open sky.
+  Mining out a mountain leaves overhead rock.
+- **Plants (RW):** growth is full above 6°C, slows below that, and stops at 0°C. It slows above
+  42°C and stops around 58°C.
+- **Spoilage (RW, from memory; the wiki's rot page didn't load):** raw berries rot in about 14
+  days, rice in about 40, and a simple meal in about 4. Herbal medicine and canned food don't
+  rot. Food is frozen at or below 0°C and rots slower between 0 and 10°C.
 
 ## Storyteller
 
@@ -159,6 +181,9 @@ RimWorld's director AI. It decides *when* things happen and *how big* threats ar
 - [RimWorld Wiki – Room stats](https://rimworldwiki.com/wiki/Room_stats)
 - [RimWorld Wiki – Stockpile zone](https://rimworldwiki.com/wiki/Stockpile_zone)
 - [RimWorld Wiki – Bills](https://rimworldwiki.com/wiki/Bills)
+- [RimWorld Wiki – Temperature](https://rimworldwiki.com/wiki/Temperature)
+- [RimWorld Wiki – Roof](https://rimworldwiki.com/wiki/Roof)
+- [RimWorld Wiki – Hypothermia](https://rimworldwiki.com/wiki/Hypothermia)
 - [Decompiled `JobGiver_Work.cs`](https://github.com/josh-m/RW-Decompile/blob/master/RimWorld/JobGiver_Work.cs)
 - [RimWorldModGuide – How Pawns Think](https://github.com/roxxploxx/RimWorldModGuide/wiki/SHORTTUTORIAL:-How-Pawns-Think)
 - [Steam discussion – Storyteller XML (Cassandra comps)](https://steamcommunity.com/app/294100/discussions/0/2217311444334859233/)

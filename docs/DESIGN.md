@@ -143,6 +143,59 @@ Candidate set (about 6–8 pieces total):
 Touch design: **drag to draw a belt path** (direction follows your finger), tap a machine to
 set what it makes.
 
+### Phase 3 spec (ready to build)
+
+**Power, designed for touch.** No wire drawing. **Power poles** join anything within a 6-cell
+radius (Factorio-style), and poles within 8 cells of each other link up on their own. Networks
+are recomputed only when something is built or destroyed, the same way rooms are.
+- Generators and solar panels supply watts. Machines draw watts only while working.
+- Batteries soak up any surplus and cover shortfalls.
+- If demand exceeds supply and the batteries are empty, it's a **brownout**: machines stop, and
+  a letter says which network and why.
+- A power overlay (the layers button cycles Rooms → Power → Off) colors each network and shows
+  its supply against its demand.
+
+**The pieces** (the core eight, then four optional extras that tie into systems that already exist):
+
+| Piece | Size | Power | Behavior | Hooks it uses |
+|---|---|---|---|---|
+| Fuel generator | 2×2 | +1000 W | Burns wood; **noise radius 18** while running | fuel system, building tick, `makeNoise` |
+| Solar panel | 2×2 | +400 W by day | Silent. Doesn't work under a roof | roofs, time of day |
+| Battery | 1×2, rotatable | stores 1000 Wd | Charges from surplus, drains on shortfall | building tick |
+| Power pole | 1×1 | — | Connects everything within 6 cells | union-find like rooms |
+| Conveyor belt | 1×1, directional | — | Moves an item one cell every ~30 ticks | new item-on-belt layer |
+| Loader arm | 1×1, directional | 150 W | Takes from the cell behind (stockpile, belt, machine output), puts to the cell in front | bench `stock` as input buffer |
+| Ammo press | 2×2 | 300 W | 5 scrap → 15 ammo with nobody working it; small noise | recipes, bills |
+| Auto-turret | 1×1 | 200 W | Shoots zombies within 14 cells, fed with ammo (by arm or by hand); **loud** | combat `shoot`, noise |
+| *Electric stove* | 2×1 | 350 W | Cooks meals, no fuel, and it's a kitchen | recipes, rooms |
+| *Freezer (cooler)* | 1×1 | 250 W | Pulls its room toward −5°C, so food keeps | room temperature, spoilage |
+| *Grow lamp* | 1×1 | 200 W | Plants within 3 cells grow under a roof | roofs block sunlight (2b) |
+| *Floodlight* | 1×1 | 100 W | Light radius 12 at night; zombies are drawn to it | lighting, noise |
+
+**What Phase 2b already put in place:**
+- **Fuel:** `buildings.js` burning plus refuel jobs. Generators reuse it as is.
+- **A per-building tick hook** (`tickBuildings`) where power, production, and noise will go.
+- **Multi-cell, rotatable placement** (the ↻ button, footprint preview, `sw`/`sh` on blueprints
+  and buildings). Machines are 2×2 and arms are directional.
+- **Room temperature and heat sources** for the freezer and electric stove, and **roofs that
+  block sunlight** for the grow lamp and solar panels.
+- **Spoilage**, which is what makes the freezer worth having.
+
+**Engine work still to do in Phase 3:**
+1. Direction as data (`t.dir` 0–3) and a drag gesture that sets it for belts.
+2. A belt item layer: items riding belts, separate from ground stacks, drawn sliding.
+3. Machine input and output buffers, generalizing bench `stock`.
+4. Power networks: union-find and a supply/demand solve every rare tick.
+5. The power overlay, and machine inspectors (power status, buffers, recipe).
+6. **Performance:** `findWork` costs about 5 ms per call because every WorkGiver scans all
+   things. Before machines add more, add per-kind indexes (items, blueprints, designated things)
+   updated in `spawn`/`despawn`.
+
+**Milestones:** 3a power (poles, generator, solar, battery, overlay, brownouts, generator
+noise), then 3b production (ammo press, then the optional electric stove, freezer, and grow
+lamp), then 3c logistics (belts drawn by finger, loader arms), then 3d defense (auto-turret fed
+by belts, floodlight).
+
 ## 10. The Director (storyteller)
 
 Left 4 Dead's AI Director × RimWorld's Cassandra:
@@ -210,11 +263,16 @@ night lighting; touch gestures and the touch UI (dock, tool chip, tappable alert
 Medical (doctors, bleeding and tending, rescue, medicine, treatable infection); a workbench with
 weapons and ammo, where guns mean noise; barricades, spike traps, and watchtowers; a guard
 schedule and alarm; a burn pit; save/load with autosave.
-*Deferred to 2b:* rooms and roofs, temperature and seasons.
+**Phase 2b: rooms and climate (done)**
+Rooms (walls, doors, and rock bound them; roles; impressiveness), auto-roofing plus roof areas,
+roof support and collapse, natural rock roofs; seasons, day/night temperature, cold snaps and
+heat waves; room heating (wood stove, campfire) with thermostats; hypothermia and heatstroke;
+crops need warmth and open sky, frost kills them, and sowing follows the season; food spoils
+unless kept cold; zombies slow down in the cold; fuel and refueling; multi-cell rotatable
+placement (the 2×1 table). The rooms/roofs/temperature overlay.
 
-**Phase 3: automation**
-A handful of machines (see §9): power, belts, a loader arm, an ammo press, an electric stove,
-turrets, and floodlights.
+**Phase 3: automation (next)**
+A handful of machines. The full spec, what's already prepared, and the milestones are in §9.
 
 **Phase 4: people and the world**
 Relationships, human factions, choice events, expeditions, and more zombie types.

@@ -153,9 +153,15 @@ export function learn(p, skill, xp) {
 export function workSpeed(p, skill) {
   let speed = skill && p.skills[skill] ? 0.5 + 0.1 * p.skills[skill].level : 1;
   for (const t of p.traits) speed *= TRAITS[t].workSpeed ?? 1;
-  // Hurt people work slower.
+  // Hurt, freezing, or overheated people work slower.
   if (p.maxHp) speed *= 0.5 + 0.5 * Math.min(1, p.hp / p.maxHp);
-  return speed;
+  return speed * exposureSlow(p);
+}
+
+// (RW) minor hypothermia/heatstroke (> 0.2) slows you a little, serious (> 0.35) a lot.
+export function exposureSlow(p) {
+  const e = Math.max(p.hypothermia ?? 0, p.heatstroke ?? 0);
+  return e > 0.35 ? 0.65 : e > 0.2 ? 0.88 : 1;
 }
 
 export const traitMult = (p, field) => p.traits.reduce((m, t) => m * (TRAITS[t][field] ?? 1), 1);

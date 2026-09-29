@@ -5,7 +5,7 @@
 // Job fields: def, kind ('need'|'work'|'joy'|'idle'|'mental'|'combat'|'guard'), report (UI
 // text), toils, reserve (keys taken on start), failIf(w,p,j) every tick, onEnd(w,p,j,outcome).
 
-import { MOVE_CELLS_PER_TICK, CARRY_CAPACITY, TICKS_PER_HOUR } from './config.js';
+import { MOVE_CELLS_PER_TICK, CARRY_CAPACITY, TICKS_PER_HOUR, COMFORT, ROOMS } from './config.js';
 import { THINGS, RECIPES, salvageYield, salvageWork, ingKey } from './defs.js';
 import { findPath } from './path.js';
 import {
@@ -13,8 +13,9 @@ import {
   tkey, ckey, plantAt, buildingAt, blueprintAt, itemAt, canReach, canReachThing, allThings, dist, letter,
   randomReachableCell, findEdgeCell, colonists, sizeOf, pawnById, DIRS,
 } from './world.js';
-import { learn, workSpeed, REST_GAIN, JOY_GAIN } from './pawn.js';
+import { learn, workSpeed, exposureSlow, REST_GAIN, JOY_GAIN } from './pawn.js';
 import { addMemory } from './mood.js';
+import { roomOf, tempAt, isRoofed, applyRoofWork, roofAfterMining } from './rooms.js';
 
 export const DONE = 'done';
 export const FAIL = 'fail';
@@ -114,7 +115,7 @@ export function stepMove(w, p) {
   const diag = nx !== p.x && ny !== p.y;
   const hurt = p.maxHp ? 0.6 + 0.4 * Math.min(1, p.hp / p.maxHp) : 1;
   const burden = p.carryingPawn ? 0.7 : 1;
-  m.progress += (MOVE_CELLS_PER_TICK * (p.speed ?? 1) * hurt * burden) / (moveCost(w, nx, ny) * (diag ? Math.SQRT2 : 1));
+  m.progress += (MOVE_CELLS_PER_TICK * (p.speed ?? 1) * hurt * burden * exposureSlow(p)) / (moveCost(w, nx, ny) * (diag ? Math.SQRT2 : 1));
   if (m.progress < 1) return;
   m.progress = 0;
   p.x = nx;
@@ -163,7 +164,9 @@ export const pickUp = (key, max) => instant((w, p, j) => {
   item.count -= n;
   const { id, def, x, y, count, ...props } = item;
   if (item.count <= 0) despawn(w, item);
-  p.carrying = { def: item.def, count: (p.carrying?.count ?? 0) + n, props: THINGS[def].stack === 1 ? props : undefined };
+  const had = p.carrying?.count ?? 0;
+  const rot = THINGS[def].rotDays ? ((p.carrying?.props?.rot ?? 0) * had + (item.rot ?? 0) * n) / (had + n) : undefined;
+  p.carrying = { def: item.def, count: had + n, props: THINGS[def].stack === 1 ? props : rot !== undefined ? { rot } : undefined };
 });
 
 const dropAt = (key) => instant((w, p, j) => {
@@ -221,24 +224,29 @@ export function newBills(def) {
 export function completeBlueprint(w, bp) {
   const { x, y } = bp;
   const def = THINGS[bp.builds];
+  const [sw, sh] = sizeOf(bp);
   despawn(w, bp);
-  const plant = plantAt(w, x, y);
-  if (plant) despawn(w, plant);
-  const props = def.bench ? { stock: {}, bills: newBills(def) } : def.trap ? { armed: true } : {};
+  const cells = [];
+  for (let cy = y; cy < y + sh; cy++) for (let cx = x; cx < x + sw; cx++) cells.push([cx, cy]);
+  for (const [cx, cy] of cells) { const plant = plantAt(w, cx, cy); if (plant) despawn(w, plant); }
+  const props = { ...(def.bench ? { stock: {}, bills: newBills(def) } : {}), ...(def.trap ? { armed: true } : {}), ...(def.fuel ? { fuel: 0 } : {}) };
+  if (sw !== (def.size?.[0] ?? 1) || sh !== (def.size?.[1] ?? 1)) Object.assign(props, { sw, sh }); // rotated
   spawn(w, bp.builds, x, y, props);
   if (!def.blocks) return;
-  const item = itemAt(w, x, y);
-  if (item) {
-    const { id, def: d, x: ix, y: iy, count, ...rest } = item;
-    despawn(w, item);
-    spawnItem(w, d, count, x, y, rest);
-  }
-  for (const p of w.pawns) {
-    if (p.x !== x || p.y !== y) continue;
-    const free = DIRS.map(([dx, dy]) => [x + dx, y + dy]).find(([nx, ny]) => passable(w, nx, ny));
-    if (free) [p.x, p.y] = free;
-    p.move = null;
-    p.interrupt = true;
+  for (const [cx, cy] of cells) {
+    const item = itemAt(w, cx, cy);
+    if (item) {
+      const { id, def: d, x: ix, y: iy, count, ...rest } = item;
+      despawn(w, item);
+      spawnItem(w, d, count, cx, cy, rest);
+    }
+    for (const p of w.pawns) {
+      if (p.x !== cx || p.y !== cy) continue;
+      const free = DIRS.map(([dx, dy]) => [cx + dx, cy + dy]).find(([nx, ny]) => passable(w, nx, ny));
+      if (free) [p.x, p.y] = free;
+      p.move = null;
+      p.interrupt = true;
+    }
   }
 }
 
@@ -279,6 +287,7 @@ export function mineJob(w, rock) {
     failIf: (w, p, j) => !isSpawned(w, j.target) || j.target.designation !== 'mine',
     toils: [goTo((j) => j.target, true), work({ amount: () => def.mineWork, skill: 'mining', target: (j) => j.target, onDone: (w) => {
       despawn(w, rock);
+      roofAfterMining(w, rock.x, rock.y);
       spawnItem(w, def.yield.def, def.yield.count, rock.x, rock.y);
     } })],
   };
@@ -371,6 +380,58 @@ export function shelterJob(w, cell) {
   };
 }
 
+// ---- Roofs, fuel, warmth ----------------------------------------------------
+
+export function roofJob(w, x, y, remove) {
+  const cell = { x, y };
+  return {
+    def: remove ? 'unroof' : 'roof', kind: 'work', report: remove ? 'taking down a roof' : 'building a roof', cell,
+    reserve: ['r' + (y * w.w + x)],
+    toils: [goTo((j) => j.cell, true), work({ amount: () => ROOMS.roofWork, skill: 'construction', target: (j) => j.cell, onDone: (w) => applyRoofWork(w, x, y, remove) })],
+  };
+}
+
+// Fill a campfire or stove with wood.
+export function refuelJob(w, item, target, count) {
+  return {
+    def: 'refuel', kind: 'work', report: `refueling the ${label(target.def)}`, item, target,
+    reserve: [tkey(item), tkey(target)],
+    failIf: (w, p, j) => !isSpawned(w, j.target) || (!p.carrying && !isSpawned(w, j.item)),
+    toils: [
+      goTo((j) => j.item, true),
+      pickUp('item', () => count),
+      goTo((j) => j.target, true),
+      instant((w, p, j) => {
+        const cap = THINGS[j.target.def].fuel.capacity;
+        const used = Math.max(0, Math.min(p.carrying.count, Math.floor(cap - (j.target.fuel ?? 0)))); // whole logs only
+        j.target.fuel = (j.target.fuel ?? 0) + used;
+        p.carrying.count -= used;
+        if (p.carrying.count <= 0) p.carrying = null;
+      }),
+    ],
+  };
+}
+
+// Too cold or too hot: go somewhere comfortable and wait it out.
+export function warmUpJob(w, p, cell, cold) {
+  return {
+    def: 'warmUp', kind: 'need', report: cold ? 'warming up' : 'cooling off', cell,
+    toils: [goTo((j) => j.cell, false), wait(1200, (w, p) => ((cold ? p.hypothermia : p.heatstroke) < 0.05 ? DONE : undefined))],
+  };
+}
+
+// Waking up: the bedroom (or lack of one) leaves a memory.
+function sleepThoughts(w, p, bed) {
+  if (!bed) addMemory(p, 'sleptOnGround');
+  const t = tempAt(w, p.x, p.y);
+  if (!isRoofed(w, p.x, p.y)) addMemory(p, 'sleptOutside');
+  if (t < COMFORT.min) addMemory(p, 'sleptCold');
+  else if (t > COMFORT.max) addMemory(p, 'sleptHot');
+  const room = bed && roomOf(w, bed.x, bed.y);
+  if (room?.role === 'bedroom') addMemory(p, `bedroom${room.level}`);
+  else if (room?.role === 'barracks') addMemory(p, 'sleptInBarracks');
+}
+
 // ---- Need jobs ------------------------------------------------------------
 
 // Best food it can reach: meals, then canned, then raw — unless the worse food is much closer.
@@ -407,6 +468,7 @@ export function eatJob(w, p, food, binge = false) {
         p.carrying = null;
         if (THINGS[c.def].tags.includes('rawFood')) addMemory(p, 'ateRawFood');
         if (!j.table) addMemory(p, 'ateWithoutTable');
+        else { const room = roomOf(w, j.table.x, j.table.y); if (room?.role === 'dining' && room.level >= 2) addMemory(p, `dining${room.level}`); }
       }),
     ],
   };
@@ -445,7 +507,7 @@ export function sleepJob(w, p) {
         },
       },
     ],
-    onEnd: (w, p, j) => { if (!j.bed && j.slept > TICKS_PER_HOUR) addMemory(p, 'sleptOnGround'); },
+    onEnd: (w, p, j) => { if (j.slept > TICKS_PER_HOUR) sleepThoughts(w, p, j.bed); },
   };
 }
 

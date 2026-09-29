@@ -9,7 +9,8 @@ import { addMemory } from './mood.js';
 import { findWork } from './work.js';
 import { threatResponse, weaponOf } from './combat.js';
 import { needsTending, patientJob } from './medical.js';
-import { findFood, eatJob, sleepJob, joyJob, wanderJob, tantrumJob, leaveMapJob, stealJob, equipJob, ammoJob, guardJob, shelterJob } from './jobs.js';
+import { comfortableRooms } from './climate.js';
+import { findFood, eatJob, sleepJob, joyJob, wanderJob, tantrumJob, leaveMapJob, stealJob, equipJob, ammoJob, guardJob, shelterJob, warmUpJob } from './jobs.js';
 
 const eat = (w, p) => { const f = findFood(w, p); return f && eatJob(w, p, f); };
 
@@ -24,6 +25,7 @@ export function think(w, p) {
   return (
     (food < FOOD_URGENT && eat(w, p)) ||
     (rest < REST_EXHAUSTED && sleepJob(w, p)) ||
+    comfortJob(w, p) ||
     (w.alarm && alarmJob(w, p)) ||
     (needsTending(w, p) && patientJob(w, p)) ||
     (slot === 'guard' && canFight(p) && postJob(w, p)) ||
@@ -78,6 +80,22 @@ function alarmJob(w, p) {
     }
   }
   return null;
+}
+
+// Getting hypothermia or heatstroke: head for the nearest comfortable indoor room.
+function comfortJob(w, p) {
+  const cold = (p.hypothermia ?? 0) > 0.15, hot = (p.heatstroke ?? 0) > 0.15;
+  if (!cold && !hot) return null;
+  let best = null, bestD = Infinity;
+  for (const r of comfortableRooms(w)) {
+    for (const i of r.cells) {
+      const c = { x: i % w.w, y: (i / w.w) | 0 };
+      const d = dist(p, c);
+      if (d < bestD && canReach(w, p, c.x, c.y, false)) { best = c; bestD = d; }
+      if (bestD === 0) break;
+    }
+  }
+  return best && warmUpJob(w, p, best, cold);
 }
 
 // Pick up a better weapon, or top up ammo for the one you have.

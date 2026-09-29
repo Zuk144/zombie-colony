@@ -9,6 +9,7 @@ import { makeColonist, makeZombie, makeLooter } from './pawn.js';
 import { addMemory } from './mood.js';
 import { makeNoise } from './combat.js';
 import { setAlarm } from './think.js';
+import { seasonOf } from './climate.js';
 
 export const DIRECTOR = {
   firstWalkerDay: 0.4, // a lone walker the first afternoon
@@ -72,6 +73,11 @@ export function tickDirector(w) {
     }
   }
 
+  if (w.weather && w.tick >= w.weather.until) {
+    letter(w, w.weather.kind === 'coldSnap' ? 'The cold snap has broken.' : 'The heat wave has passed.', 'good');
+    w.weather = null;
+  }
+
   // The horde is over when no zombie is hunting any more.
   const hunting = w.pawns.some((z) => z.faction === 'zombie' && z.state === 'hunt');
   if (s.hordeActive && !hunting && colonists(w).length) {
@@ -81,7 +87,8 @@ export function tickDirector(w) {
     for (const p of colonists(w)) addMemory(p, 'survivedAttack');
   }
 
-  const strayMtb = D.strayMtbDays / (isNight(w.tick) ? D.nightStrayMult : 1);
+  const winter = seasonOf(w.tick) === 'Winter';
+  const strayMtb = (D.strayMtbDays / (isNight(w.tick) ? D.nightStrayMult : 1)) * (winter ? 2 : 1); // the cold keeps them sluggish
   if (rng.chance(mtbChance(strayMtb * TICKS_PER_DAY, STORY_INTERVAL))) strays(w, rng.int(1, 2));
 
   if (rng.chance(mtbChance(D.miscMtbDays * TICKS_PER_DAY, STORY_INTERVAL))) {
@@ -224,6 +231,22 @@ const MISC = [
     },
   },
   { key: 'looters', weight: 1, canFire: (w) => w.tick > 6 * TICKS_PER_DAY, fire: looters },
+  {
+    key: 'coldSnap', weight: 1.5,
+    canFire: (w) => !w.weather && seasonOf(w.tick) !== 'Summer',
+    fire(w) {
+      w.weather = { kind: 'coldSnap', offset: -w.rng.range(12, 18), until: w.tick + w.rng.range(1, 2) * TICKS_PER_DAY };
+      letter(w, 'A cold snap is coming. Temperatures will plunge for a day or two. Get everyone somewhere warm.', 'bad');
+    },
+  },
+  {
+    key: 'heatWave', weight: 1.5,
+    canFire: (w) => !w.weather && seasonOf(w.tick) === 'Summer',
+    fire(w) {
+      w.weather = { kind: 'heatWave', offset: w.rng.range(10, 14), until: w.tick + w.rng.range(1, 2) * TICKS_PER_DAY };
+      letter(w, 'A heat wave has settled in. The dead are restless, and so is everyone else.', 'bad');
+    },
+  },
 ];
 
 export const debugIncidents = {

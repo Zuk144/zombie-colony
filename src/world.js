@@ -25,6 +25,14 @@ export function createWorld(seed) {
     reach: new Int32Array(n), // connected-area label per cell (survivor rules), -1 = blocked
     reachDirty: true,
     zfield: new Float32Array(n).fill(Infinity), // zombie flow field: bash-aware distance to survivors
+    roof: new Uint8Array(n), // 0 open sky, 1 built roof, 2 natural rock roof (mined-out mountain)
+    roofArea: new Int8Array(n), // player intent: 0 automatic, 1 always roof, -1 never roof
+    roomAt: new Int32Array(n).fill(-1), // index into w.rooms, -1 = outdoors (or a door)
+    rooms: [], // derived: { id, cells, size, temp, role, indoors, ... } — see rooms.js
+    roomsDirty: true,
+    support: new Uint8Array(n), // derived: 1 where a roof would be held up (within 6 of a wall)
+    outdoor: 12, // °C, updated every rare tick by climate.js
+    weather: null, // { kind, offset, until } — cold snaps and heat waves
     terrainDirty: [], // cells whose terrain art must be redrawn (rock mined, etc.)
     roads: [],
     nextId: 1,
@@ -109,13 +117,16 @@ export const isSpawned = (w, t) => !!t && w.things.has(t.id);
 function cellChanged(w, t) {
   const d = THINGS[t.def];
   if (d.blocks) w.reachDirty = true;
+  if ((d.blocks && !d.seeThrough) || d.door) w.roomsDirty = true;
   if (d.natural) forFootprint(t, (x, y) => w.terrainDirty.push(x, y));
 }
 
 // Places `count` items at (x, y), merging into same-def stacks and spilling outward (BFS)
-// when the cell is full or blocked. Stack-1 items (corpses) keep their `props`.
+// when the cell is full or blocked. Stack-1 items (corpses) keep their `props`; for food,
+// props.rot carries spoilage, and merged stacks average it (RW does the same).
 export function spawnItem(w, def, count, x, y, props) {
   const stack = THINGS[def].stack;
+  const rot = props?.rot ?? 0;
   const seen = new Set([idx(w, x, y)]);
   const queue = [[x, y]];
   while (count > 0 && queue.length) {
@@ -128,6 +139,7 @@ export function spawnItem(w, def, count, x, y, props) {
         count -= n;
       } else if (it.def === def && it.count < stack) {
         const n = Math.min(count, stack - it.count);
+        if (THINGS[def].rotDays) it.rot = ((it.rot ?? 0) * it.count + rot * n) / (it.count + n);
         it.count += n;
         count -= n;
       }

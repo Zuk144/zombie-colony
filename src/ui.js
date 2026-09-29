@@ -4,8 +4,8 @@
 // Layout (docs/DESIGN.md §11): time + roster + alerts on top, tool dock bottom-center,
 // inspector on the right (bottom sheet on narrow screens), letters top-left (tap to jump).
 
-import { TILE, MEDICAL } from './config.js';
-import { THINGS, WORK_TYPES, SKILLS, TRAITS, RECIPES, SCHEDULE_SLOTS, CROPS, canSalvage, ingKey } from './defs.js';
+import { TILE, MEDICAL, COMFORT } from './config.js';
+import { THINGS, WORK_TYPES, SKILLS, TRAITS, RECIPES, SCHEDULE_SLOTS, CROPS, IMPRESSIVENESS, ROOM_ROLES, canSalvage, ingKey } from './defs.js';
 import {
   inBounds, idx, thingsAt, plantAt, buildingAt, blueprintAt, itemAt, passable, terrainAt, spawn, despawn, spawnItem,
   dateParts, colonists, dayOf, hourOf, countOwned, isNight, letter,
@@ -16,6 +16,9 @@ import { xpToNext, isGentle } from './pawn.js';
 import { weaponOf } from './combat.js';
 import { isTended } from './medical.js';
 import { setAlarm } from './think.js';
+import { roomOf, tempAt } from './rooms.js';
+import { plantGrowthFactor, rotFactor, exposureStage, seasonOf } from './climate.js';
+import { hasFuel } from './buildings.js';
 import { threatPoints, debugIncidents, colonyCenter } from './director.js';
 import { saveGame, saveInfo } from './save.js';
 import { createInput } from './input.js';
@@ -29,7 +32,7 @@ const costText = (cost) => Object.entries(cost).map(([k, n]) => `${n} ${THINGS[k
 const ingText = (r) => r.ingredients.map((i) => `${i.count} ${i.def ? THINGS[i.def].label.toLowerCase() : i.tag === 'rawFood' ? 'raw food' : i.tag}`).join(' + ');
 
 const BUILD_HINTS = {
-  wall: 'Drag a rectangle; walls go around the edge. Zombies must bash through.',
+  wall: 'Drag a rectangle; walls go around the edge. Zombies must bash through. Enclosed rooms get roofed automatically.',
   stoneWall: 'Drag a rectangle. Tough walls; needs mined stone.',
   scrapWall: 'Drag a rectangle. Sturdy walls from salvaged scrap.',
   barricade: 'Drag a line. Blocks zombies, but survivors can see and shoot over it.',
@@ -38,7 +41,8 @@ const BUILD_HINTS = {
   guardPost: 'A survivor on watch here sees and shoots farther. Guard shifts and the alarm send fighters here.',
   torch: 'Light for the night. Tap to place, or drag a row.',
   bed: 'Sleep, healing, and treatment. Tap to place, or drag a row.',
-  table: 'Eating at a table keeps spirits up.',
+  table: 'Eating at a table keeps spirits up. A room with a table becomes a dining room. Tap ↻ to rotate.',
+  woodStove: 'Heats its room to 21°C while it has wood. Walls and a roof keep the heat in.',
   campfire: 'Cooks raw food into meals. Set bills in the inspector.',
   workbench: 'Makes ammo, machetes, and guns from scrap. Add bills in the inspector.',
   burnPit: 'Burns bodies so they can never rise. Haulers bring the dead here.',
@@ -46,7 +50,12 @@ const BUILD_HINTS = {
 
 export function createUI(w, r) {
   const $ = (id) => document.getElementById(id);
-  const ui = { tool: null, selected: null, drag: null, hover: null, ripples: [], openCat: null, workTab: 'priorities', paintSlot: 'guard' };
+  const ui = { tool: null, selected: null, drag: null, hover: null, ripples: [], openCat: null, workTab: 'priorities', paintSlot: 'guard', rot: 0, overlay: false };
+
+  // Per-device preferences (not part of the save).
+  const prefs = (() => { try { return JSON.parse(localStorage.getItem('holdout.prefs')) ?? {}; } catch { return {}; } })();
+  const savePrefs = () => { try { localStorage.setItem('holdout.prefs', JSON.stringify(prefs)); } catch { /* storage blocked */ } };
+  ui.fmtTemp = (c) => (prefs.fahrenheit ? `${Math.round(c * 1.8 + 32)}°F` : `${Math.round(c)}°C`);
 
   // ---- Tools ----------------------------------------------------------------
 
@@ -60,11 +69,32 @@ export function createUI(w, r) {
   const harvestPick = (x, y) => { const p = plantAt(w, x, y); return p && !THINGS[p.def].woody && THINGS[p.def].yield ? p : null; };
   const minePick = (x, y) => { const b = buildingAt(w, x, y); return b && THINGS[b.def].mineWork ? b : null; };
   const salvagePick = (x, y) => { const b = buildingAt(w, x, y); return b && canSalvage(THINGS[b.def]) ? b : null; };
-  const build = (def) => ({
-    key: `build:${def}`, label: THINGS[def].label, icon: iconFor(def), cost: costText(THINGS[def].cost), hint: BUILD_HINTS[def],
-    shape: THINGS[def].wallLike && def !== 'barricade' ? 'outline' : 'line',
-    ok: canPlace,
-    apply: (cells) => { for (const [x, y] of cells) if (canPlace(x, y)) spawn(w, 'blueprint', x, y, { builds: def, stock: {} }); },
+  // Multi-cell buildings place one at your finger (footprint anchored top-left), ↻ rotates.
+  const footprint = (def) => { const [a, b] = THINGS[def].size ?? [1, 1]; return ui.rot % 2 ? [b, a] : [a, b]; };
+  const build = (def) => {
+    const multi = !!THINGS[def].size;
+    return {
+      key: `build:${def}`, label: THINGS[def].label, icon: iconFor(def), cost: costText(THINGS[def].cost), hint: BUILD_HINTS[def],
+      shape: multi ? 'footprint' : THINGS[def].wallLike && def !== 'barricade' ? 'outline' : 'line',
+      footprint: multi ? () => footprint(def) : null,
+      rotatable: !!THINGS[def].rotatable,
+      ok: canPlace,
+      apply(cells) {
+        if (multi) {
+          if (!cells.length || !cells.every(([x, y]) => canPlace(x, y))) return;
+          const [sw, sh] = footprint(def);
+          spawn(w, 'blueprint', cells[0][0], cells[0][1], { builds: def, stock: {}, sw, sh });
+          return;
+        }
+        for (const [x, y] of cells) if (canPlace(x, y)) spawn(w, 'blueprint', x, y, { builds: def, stock: {} });
+      },
+    };
+  };
+  // Roof areas (like RW's build-roof / no-roof areas): paint intent, builders do the work.
+  const roofArea = (value) => ({
+    shape: 'rect',
+    ok: (x, y) => inBounds(w, x, y) && w.roofArea[idx(w, x, y)] !== value,
+    apply: (cells) => { for (const [x, y] of cells) w.roofArea[idx(w, x, y)] = value; },
   });
   const zone = (type) => ({
     shape: 'rect',
@@ -83,18 +113,21 @@ export function createUI(w, r) {
         apply: (cells) => cells.forEach(([x, y]) => cancelAt(x, y)) },
     ] },
     { key: 'build', label: 'Build', icon: 'build', tools: ['wall', 'stoneWall', 'scrapWall', 'barricade', 'door', 'spikeTrap', 'guardPost', 'torch'].map(build) },
-    { key: 'furnish', label: 'Furnish', icon: 'bed', tools: ['bed', 'table', 'campfire', 'workbench', 'burnPit'].map(build) },
+    { key: 'furnish', label: 'Furnish', icon: 'bed', tools: ['bed', 'table', 'campfire', 'woodStove', 'workbench', 'burnPit'].map(build) },
     { key: 'zones', label: 'Zones', icon: 'zones', tools: [
       { key: 'zone:stockpile', label: 'Stockpile', icon: 'stockpile', hotkey: 'z', hint: 'Drag an area. Haulers bring items here.', ...zone('stockpile') },
       { key: 'zone:grow', label: 'Grow', icon: 'grow', hotkey: 'g', hint: 'Drag over soil. Growers sow and harvest here. Pick the crop in the inspector.', ...zone('grow') },
       { key: 'zone:shelter', label: 'Shelter', icon: 'shelter', hint: 'Where survivors set to Flee run when zombies appear or the alarm sounds. Put it behind walls.', ...zone('shelter') },
       { key: 'zone:remove', label: 'Remove', icon: 'eraser', hint: 'Drag to erase zones.', shape: 'rect', ok: (x, y) => inBounds(w, x, y) && !!w.zoneAt[idx(w, x, y)], apply: (cells) => removeZoneCells(w, cells) },
+      { key: 'roof:always', label: 'Roof', icon: 'roof', hint: 'Always roof here, even outside a room (a covered porch). Needs a wall within 6 tiles.', ...roofArea(1) },
+      { key: 'roof:never', label: 'No roof', icon: 'noRoof', hint: 'Never roof here: builders take down existing roofs. Good for courtyards and indoor fields.', ...roofArea(-1) },
+      { key: 'roof:auto', label: 'Auto roof', icon: 'autoRoof', hint: 'Back to automatic: enclosed rooms get roofed.', ...roofArea(0) },
     ] },
   ];
   const TOOL = Object.fromEntries(CATEGORIES.flatMap((c) => c.tools.map((t) => [t.key, t])));
 
   function iconFor(def) {
-    return { wall: 'wall', stoneWall: 'stoneWall', scrapWall: 'scrapWall', door: 'door', bed: 'bed', table: 'table', campfire: 'campfire', torch: 'torch' }[def] ?? def;
+    return def;
   }
 
   function cancelAt(x, y) {
@@ -109,6 +142,11 @@ export function createUI(w, r) {
   function toolCells(tool, d) {
     const rect = { x0: Math.min(d.x0, d.x1), y0: Math.min(d.y0, d.y1), x1: Math.max(d.x0, d.x1), y1: Math.max(d.y0, d.y1) };
     const cells = [];
+    if (tool.shape === 'footprint') {
+      const [fw, fh] = tool.footprint();
+      for (let y = d.y1; y < d.y1 + fh; y++) for (let x = d.x1; x < d.x1 + fw; x++) cells.push([x, y]);
+      return { rect: null, cells: cells.every(([x, y]) => inBounds(w, x, y)) ? cells : [] };
+    }
     if (tool.shape === 'line') {
       // Bresenham from start to finger.
       let x = d.x0, y = d.y0;
@@ -135,7 +173,7 @@ export function createUI(w, r) {
     const d = ui.drag ?? (ui.hover && { x0: ui.hover.x, y0: ui.hover.y, x1: ui.hover.x, y1: ui.hover.y });
     if (!d) return null;
     const { rect, cells } = toolCells(tool, d);
-    return { cells: cells.map(([x, y]) => ({ x, y, ok: tool.ok(x, y) })), rect: ui.drag && tool.shape !== 'line' ? rect : null };
+    return { cells: cells.map(([x, y]) => ({ x, y, ok: tool.ok(x, y) })), rect: ui.drag && rect && tool.shape !== 'line' ? rect : null };
   };
 
   function applyTool(d) {
@@ -152,6 +190,7 @@ export function createUI(w, r) {
       $('toolChip').querySelector('.tc-icon').innerHTML = icon(tool.icon);
       $('toolName').textContent = tool.label;
       $('toolHint').textContent = tool.hint;
+      $('toolRotate').hidden = !tool.rotatable;
       closeTray();
     }
     renderTray();
@@ -184,6 +223,9 @@ export function createUI(w, r) {
     if (b) setTool(b.dataset.tool);
   });
   $('toolDone').addEventListener('click', () => setTool(null));
+  $('toolRotate').addEventListener('click', () => { ui.rot = (ui.rot + 1) % 2; });
+  $('layersBtn').addEventListener('click', () => { ui.overlay = !ui.overlay; });
+  $('temp').addEventListener('click', () => { prefs.fahrenheit = !prefs.fahrenheit; savePrefs(); });
   $('toolChip').querySelector('.tc-icon').addEventListener('click', () => openTray(CATEGORIES.find((c) => c.tools.includes(TOOL[ui.tool]))?.key));
 
   // ---- Map gestures -------------------------------------------------------
@@ -218,6 +260,8 @@ export function createUI(w, r) {
       for (const pick of [buildingAt, blueprintAt, itemAt, plantAt]) { const t = pick(w, c.x, c.y); if (t) cands.push({ thing: t }); }
       const z = w.zoneAt[idx(w, c.x, c.y)];
       if (z) cands.push({ zone: z });
+      const room = w.roomAt[idx(w, c.x, c.y)];
+      if (room >= 0) cands.push({ room: w.rooms[room] });
     }
     const same = lastPick && lastPick.x === c.x && lastPick.y === c.y && lastPick.n === cands.length;
     const i = same ? (lastPick.i + 1) % Math.max(1, cands.length) : 0;
@@ -393,6 +437,7 @@ export function createUI(w, r) {
         <button data-menu="load" ${info ? '' : 'disabled'}>${icon('play')}<span>Load save</span></button>
         <button data-menu="new" class="${confirmNew ? 'danger' : ''}">${icon('warn')}<span>${confirmNew ? 'Tap again to start over' : 'New game'}</span></button>
         <button data-menu="autoAlarm" class="${w.autoAlarm ? 'on' : ''}">${icon('bell')}<span>Auto-alarm on hordes: ${w.autoAlarm ? 'On' : 'Off'}</span></button>
+        <button data-menu="units">${icon('thermo')}<span>Temperature: ${prefs.fahrenheit ? '°F' : '°C'}</span></button>
       </div>
       <p class="hint">Save slot: ${when(info)}. Autosave: ${when(auto)} (every few in-game hours, and whenever you leave the app).</p>
       <h4>How to survive</h4>
@@ -404,6 +449,7 @@ export function createUI(w, r) {
         <li>Wounds <b>bleed</b> until a <b>doctor</b> treats them. A <b>bite</b> starts a race between infection and immunity: a bed, a doctor, and medicine usually win it.</li>
         <li><b>Everyone who dies rises again.</b> Build a <b>burn pit</b>; haulers rush bodies there.</li>
         <li>The <b>alarm</b> (bell) sends fighters to watchtowers and everyone else to shelter. The <b>Schedule</b> tab sets night watches.</li>
+        <li><b>Seasons</b> matter: crops only grow when it's warm and die in frost, food spoils unless it's kept cold, and winter nights can freeze people. Enclosed rooms get <b>roofed</b> automatically; a roofed room with a <b>wood stove</b> stays warm. The layers button shows rooms, roofs, and temperatures.</li>
         <li>Keyboard: Space pause · 1/2/3 speed · Tab work · B alarm · C chop · H harvest · M mine · V salvage · X cancel · Z stockpile · G grow · WASD pan.</li>
       </ul>
       <h4>Log</h4>
@@ -423,6 +469,7 @@ export function createUI(w, r) {
       if (!confirmNew) { confirmNew = true; return renderMenu(); }
       bootInto('new');
     } else if (act === 'autoAlarm') { w.autoAlarm = !w.autoAlarm; renderMenu(); }
+    else if (act === 'units') { prefs.fahrenheit = !prefs.fahrenheit; savePrefs(); renderMenu(); }
   });
 
   // ---- Inspector --------------------------------------------------------------
@@ -466,6 +513,13 @@ export function createUI(w, r) {
     if (!s) return '';
     if (s.pawn) return w.pawns.includes(s.pawn) ? pawnHTML(s.pawn) : ((ui.selected = null), '');
     if (s.zone) return w.zones.includes(s.zone) ? zoneHTML(s.zone) : ((ui.selected = null), '');
+    if (s.room) {
+      // Rooms are rebuilt when walls change; follow the room that now holds the same cell.
+      const now = w.rooms[w.roomAt[s.room.cells[0]]];
+      if (!now) return (ui.selected = null), '';
+      s.room = now;
+      return roomHTML(now);
+    }
     if (s.thing) return w.things.has(s.thing.id) ? thingHTML(s.thing) : ((ui.selected = null), '');
     return '';
   }
@@ -496,7 +550,12 @@ export function createUI(w, r) {
       p.carriedBy && `<p class="alert-line">Being carried to a bed by ${esc(p.carriedBy.name)}</p>`,
       p.mental && `<p class="alert-line mental">Mental break: ${esc(p.mental.label)}</p>`,
     ].filter(Boolean).join('');
+    const here = tempAt(w, p.x, p.y);
+    const exposure = [['hypothermia', 'Hypothermia'], ['heatstroke', 'Heatstroke']].filter(([k]) => (p[k] ?? 0) > 0.04).map(([k, l]) =>
+      `<div class="need"><span>${l}</span>${bar(p[k], 'low')}<em>${pct(p[k])}</em></div>`).join('');
     const medical = [
+      `<div class="need"><span>Temperature</span><span class="${here < COMFORT.min ? 'cold' : here > COMFORT.max ? 'hotText' : 'dim'}">${ui.fmtTemp(here)}${here < COMFORT.min ? ', cold' : here > COMFORT.max ? ', hot' : ''}</span></div>`,
+      exposure,
       p.bleed > 0.5 && `<div class="need"><span>Bleeding</span><span class="bleed">${icon('drop')} ${Math.round(p.bleed)} HP/day${p.bleed > MEDICAL.tendNeededBleed ? ', needs a doctor' : ''}</span></div>`,
       tended && `<div class="need"><span>Treated</span><span class="tended">${icon('cross')} quality ${pct(p.tendQuality)}%</span></div>`,
       p.infection && `<div class="infection"><b>${icon('warn')} Bitten: infection vs immunity</b>
@@ -521,8 +580,11 @@ export function createUI(w, r) {
   function zoneHTML(z) {
     if (z.type === 'grow') {
       const crops = CROPS.map((c) => `<button data-act="crop" data-def="${c}" class="${z.crop === c ? 'on' : ''}">${THINGS[c].label}</button>`).join('');
-      return head(z.label, `${z.cells.size} cells`) + `<h4>Crop</h4><div class="chips">${crops}</div>
-        <p class="hint">Rice is food (cook it into meals). Medicinal herbs become herbal medicine for your doctors.</p>`;
+      const warmth = plantGrowthFactor(w.outdoor);
+      const season = warmth <= 0 ? '<p class="alert-line">Too cold: nothing grows, and frost kills crops left out. Sowing waits for spring.</p>'
+        : warmth < 0.3 ? '<p class="alert-line">Cold: growth is slow and nobody is sowing.</p>' : '';
+      return head(z.label, `${z.cells.size} cells`) + season + `<h4>Crop</h4><div class="chips">${crops}</div>
+        <p class="hint">Rice is food (cook it into meals). Medicinal herbs become herbal medicine for your doctors. Crops need open sky and warmth.</p>`;
     }
     if (z.type === 'shelter') return head(z.label, `${z.cells.size} cells`) + `<p class="hint">Survivors set to <b>Flee</b> (and anyone badly hurt) run here when zombies show up, and everyone who isn't fighting waits here during an alarm. Keep it behind walls.</p>`;
     const items = Object.keys(THINGS).filter((k) => THINGS[k].kind === 'item');
@@ -559,19 +621,52 @@ export function createUI(w, r) {
     return `<h4>Bills</h4>${bills}<h4>Add bill</h4><div class="chips add">${add}</div>`;
   }
 
+  function fuelHTML(t, d) {
+    if (!d.fuel) return '';
+    const f = t.fuel ?? 0;
+    return `<div class="need"><span>Wood</span>${bar(f / d.fuel.capacity, f < d.fuel.capacity * 0.2 ? 'low' : '')}<em>${Math.round(f)}</em></div>
+      ${hasFuel(t) ? '' : '<p class="alert-line">Out of wood. Haulers (or the cook) will refill it.</p>'}`;
+  }
+
+  function spoilHTML(t, d) {
+    if (!d.rotDays) return '';
+    const rate = rotFactor(tempAt(w, t.x, t.y));
+    const left = d.rotDays - (t.rot ?? 0);
+    const text = rate === 0 ? `Frozen: keeps indefinitely (${ui.fmtTemp(tempAt(w, t.x, t.y))})` : `Spoils in about ${Math.max(0, left / rate).toFixed(1)} days at ${ui.fmtTemp(tempAt(w, t.x, t.y))}`;
+    return `<p class="hint">${text}. Cold rooms slow spoilage; below 0°C it stops.</p>`;
+  }
+
+  function roomHTML(r) {
+    const lvl = IMPRESSIVENESS[r.level];
+    const heaters = [...new Set(r.cells.flatMap((c) => w.cells[c]))].filter((t) => THINGS[t.def].heat);
+    const warm = heaters.filter(hasFuel).length;
+    return head(ROOM_ROLES[r.role], `${r.size} cells`) + `
+      <div class="need"><span>Temperature</span><span class="${r.temp < COMFORT.min ? 'cold' : r.temp > COMFORT.max ? 'hotText' : ''}">${ui.fmtTemp(r.temp)} <small>(outside ${ui.fmtTemp(w.outdoor)})</small></span></div>
+      <div class="need"><span>Roofed</span>${bar(r.roofed)}<em>${pct(r.roofed)}</em></div>
+      <div class="need"><span>Impressive</span><span>${lvl.label} <small>(${r.impressiveness}${lvl.mood ? `, ${lvl.mood > 0 ? '+' : ''}${lvl.mood} mood` : ''})</small></span></div>
+      <p class="hint">${r.indoors ? 'Enclosed and roofed: it holds its own temperature.' : 'Less than 75% roofed, so it stays at the outdoor temperature. Builders roof enclosed rooms automatically.'}
+      ${heaters.length ? ` ${warm} of ${heaters.length} heat source${heaters.length > 1 ? 's' : ''} burning.` : ' No heat source; add a wood stove for winter.'}
+      Space and wealth (furniture, walls) raise impressiveness; ${r.role === 'bedroom' ? 'sleeping here' : r.role === 'dining' ? 'eating here' : 'bedrooms and dining rooms'} give${r.role === 'bedroom' || r.role === 'dining' ? 's' : ''} a mood boost when it's impressive.</p>`;
+  }
+
   function thingHTML(t) {
     const d = THINGS[t.def];
     const hp = d.hp ? `<div class="need"><span>Integrity</span>${bar(t.hp / d.hp, t.hp / d.hp < 0.35 ? 'low' : '')}<em>${Math.round(t.hp)}</em></div>` : '';
     if (d.corpse) return head(t.zombie ? 'Zombie corpse' : `${t.name}'s body`, t.zombie ? 'Rots away in a few days' : 'Will rise again unless burned') + `<p class="hint">${t.zombie ? 'Bodies lying around upset survivors. A burn pit gets rid of them.' : 'Everyone who dies turns. With a burn pit, haulers rush the body there first.'}</p>`;
     if (d.weapon) return head(d.label, d.weapon.ranged ? `Range ${d.weapon.range} · loud` : 'Melee · quiet') + `<p class="hint">Survivors pick up the best weapon they can use. ${d.weapon.ranged ? 'Needs ammo; every shot draws zombies.' : ''}</p>`;
-    if (d.kind === 'item') return head(`${d.label} ×${t.count}`, d.medicine ? `Medicine, potency ${pct(d.medicine)}%` : `$${Math.round(d.value * t.count)}`);
-    if (d.kind === 'plant') return head(d.label, `Growth ${pct(t.growth)}%`) + actions(t);
+    if (d.kind === 'item') return head(`${d.label} ×${t.count}`, d.medicine ? `Medicine, potency ${pct(d.medicine)}%` : `$${Math.round(d.value * t.count)}`) + spoilHTML(t, d);
+    if (d.kind === 'plant') {
+      const i = idx(w, t.x, t.y);
+      const why = t.growth >= 1 ? 'Fully grown' : w.roof[i] ? 'Not growing: no sunlight under a roof' : plantGrowthFactor(w.outdoor) <= 0 ? 'Not growing: too cold' : 'Growing';
+      return head(d.label, `Growth ${pct(t.growth)}% · ${why}`) + actions(t);
+    }
     if (d.kind === 'blueprint') {
       const bd = THINGS[t.builds];
       const mats = Object.entries(bd.cost).map(([k, n]) => `<li><span>${THINGS[k].label}</span><span>${t.stock[k] ?? 0} / ${n}</span></li>`).join('');
       return head(`${bd.label}`, 'Blueprint') + `<ul class="thoughts">${mats}</ul><p class="hint">Builders deliver materials, then construct.</p>` + actions(t);
     }
-    if (d.bench) return head(d.label, BUILD_HINTS[t.def] ?? '') + hp + billsHTML(t, d) + actions(t);
+    if (d.bench) return head(d.label, BUILD_HINTS[t.def] ?? '') + hp + fuelHTML(t, d) + billsHTML(t, d) + actions(t);
+    if (d.fuel) return head(d.label, BUILD_HINTS[t.def] ?? '') + hp + fuelHTML(t, d) + actions(t);
     if (d.trap) return head(d.label, t.armed ? 'Armed' : 'Sprung, waiting to be reset') + hp + actions(t);
     if (d.bed) {
       const owner = w.pawns.find((p) => p.id === t.owner);
@@ -596,6 +691,11 @@ export function createUI(w, r) {
     const d = dateParts(w.tick);
     $('clock').innerHTML = `${icon(isNight(w.tick) ? 'moon' : 'sun')}<b>Day ${d.day}</b><span>${d.time}</span><small>${d.season}</small>`;
     for (const b of $('speeds').querySelectorAll('button')) b.classList.toggle('active', +b.dataset.speed === w.speed);
+    const weather = w.weather && w.tick < w.weather.until ? (w.weather.kind === 'coldSnap' ? 'cold snap' : 'heat wave') : '';
+    $('temp').innerHTML = `${icon('thermo')}<b>${ui.fmtTemp(w.outdoor)}</b>${weather ? `<span class="dim">${weather}</span>` : ''}`;
+    $('temp').classList.toggle('cold', w.outdoor < COMFORT.min - 10);
+    $('temp').classList.toggle('hot', w.outdoor > COMFORT.max + 6);
+    $('layersBtn').classList.toggle('on', ui.overlay);
 
     const hunting = w.pawns.filter((p) => p.faction === 'zombie' && p.state === 'hunt').length;
     $('threat').hidden = !hunting;

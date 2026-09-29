@@ -1,9 +1,12 @@
 // Frame rendering: camera transform, draw order, and night lighting. Terrain comes from
 // terrainArt.js (cached vector chunks); every sprite comes from art.js (vector paths).
 
-import { TILE } from './config.js';
-import { THINGS } from './defs.js';
+import { TILE, COMFORT } from './config.js';
+import { THINGS, ROOM_ROLES } from './defs.js';
 import { hourFloat, inBounds, thingsAt, sizeOf, allThings } from './world.js';
+import { isLit } from './buildings.js';
+import { seasonOf } from './climate.js';
+import { roofWantedAt, unroofWantedAt } from './rooms.js';
 import { createTerrainArt } from './terrainArt.js';
 import * as A from './art.js';
 
@@ -83,6 +86,17 @@ export function createRenderer(canvas, w) {
     const x0 = Math.max(0, Math.floor(view.x0 / T) - 2), x1 = Math.min(w.w - 1, Math.ceil(view.x1 / T) + 1);
     const y0 = Math.max(0, Math.floor(view.y0 / T) - 2), y1 = Math.min(w.h - 1, Math.ceil(view.y1 / T) + 1);
 
+    // Indoors reads slightly darker; open ground frosts over in the cold.
+    const roofed = new Path2D(), frosted = new Path2D();
+    const frost = Math.max(0, Math.min(0.32, (2 - w.outdoor) / 14));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      if (w.roof[y * w.w + x]) roofed.rect(x * T, y * T, T, T);
+      else if (frost > 0) frosted.rect(x * T, y * T, T, T);
+    }
+    ctx.fillStyle = 'rgba(18, 22, 34, 0.12)';
+    ctx.fill(roofed);
+    if (frost > 0) { ctx.fillStyle = `rgba(236, 242, 250, ${frost})`; ctx.fill(frosted); }
+
     // Zones
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const zone = w.zoneAt[y * w.w + x];
@@ -123,8 +137,9 @@ export function createRenderer(canvas, w) {
     for (const t of furniture) {
       if (t.def === 'car') A.drawCar(ctx, t, px, lod);
       else if (t.def === 'bed') A.drawBed(ctx, t, px);
-      else if (t.def === 'table') A.drawTable(ctx, t, px, lod);
-      else if (t.def === 'campfire') A.drawCampfire(ctx, t, now, px);
+      else if (t.def === 'table') A.drawTable(ctx, t, px, lod, ...sizeOf(t));
+      else if (t.def === 'campfire') A.drawCampfire(ctx, t, now, px, isLit(t));
+      else if (t.def === 'woodStove') A.drawStove(ctx, t, now, px, isLit(t));
       else if (t.def === 'torch') A.drawTorch(ctx, t, now, px);
       else if (t.def === 'spikeTrap') A.drawTrap(ctx, t, px, lod);
       else if (t.def === 'workbench') A.drawWorkbench(ctx, t, px, lod);
@@ -141,9 +156,10 @@ export function createRenderer(canvas, w) {
       const cost = THINGS[t.builds].cost;
       const need = Object.values(cost).reduce((a, b) => a + b, 0);
       const have = Object.values(t.stock).reduce((a, b) => a + b, 0);
-      A.drawBlueprint(ctx, t, px, have / need);
+      A.drawBlueprint(ctx, t, px, have / need, ...sizeOf(t));
     }
-    for (const t of trees) A.drawTree(ctx, t, px, lod);
+    const season = seasonOf(w.tick);
+    for (const t of trees) A.drawTree(ctx, t, px, lod, season);
     for (const t of badges) A.drawBadge(ctx, t, t.designation, px);
 
     // Pawns: lying first, then standing sorted by y so overlaps read naturally.
@@ -204,6 +220,7 @@ export function createRenderer(canvas, w) {
 
     drawLighting(now, x0, x1, y0, y1);
     worldTransform();
+    if (ui.overlay) drawRoomsOverlay(ui, px, x0, x1, y0, y1);
     drawOverlay(ui, px, now);
   }
 
@@ -217,7 +234,7 @@ export function createRenderer(canvas, w) {
     lctx.fillRect(0, 0, light.width, light.height);
     lctx.globalCompositeOperation = 'destination-out';
     const lights = [];
-    for (const t of allThings(w, (t, d) => d.light)) {
+    for (const t of allThings(w, (t, d) => d.light && isLit(t))) {
       const r = THINGS[t.def].light;
       if (t.x < x0 - r || t.x > x1 + r || t.y < y0 - r || t.y > y1 + r) continue;
       const flicker = 1 + Math.sin(now / 110 + t.id) * 0.03 + Math.sin(now / 47 + t.id * 3) * 0.02;
@@ -274,6 +291,50 @@ export function createRenderer(canvas, w) {
         ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(cx, cy, 4 + 10 * k, 0, Math.PI * 2); ctx.stroke();
       }
+    }
+  }
+
+  // Rooms & roofs view: roof hatching, room outlines colored by temperature with a label,
+  // and dotted cells where builders will put up (or take down) a roof.
+  function drawRoomsOverlay(ui, px, x0, x1, y0, y1) {
+    const hatch = new Path2D(), natural = new Path2D(), planned = new Path2D(), removing = new Path2D();
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const i = y * w.w + x, cx = x * T, cy = y * T;
+      if (w.roof[i]) {
+        const path = w.roof[i] === 2 ? natural : hatch;
+        path.moveTo(cx, cy + T); path.lineTo(cx + T, cy);
+        path.moveTo(cx, cy + T / 2); path.lineTo(cx + T / 2, cy);
+        path.moveTo(cx + T / 2, cy + T); path.lineTo(cx + T, cy + T / 2);
+      }
+      if (roofWantedAt(w, i)) planned.rect(cx + 3, cy + 3, T - 6, T - 6);
+      else if (unroofWantedAt(w, i)) removing.rect(cx + 3, cy + 3, T - 6, T - 6);
+    }
+    ctx.lineWidth = px;
+    ctx.strokeStyle = 'rgba(230, 236, 255, 0.35)'; ctx.stroke(hatch);
+    ctx.strokeStyle = 'rgba(200, 180, 150, 0.45)'; ctx.stroke(natural);
+    ctx.setLineDash([2 * px, 2 * px]);
+    ctx.strokeStyle = 'rgba(140, 195, 255, 0.9)'; ctx.stroke(planned);
+    ctx.strokeStyle = 'rgba(255, 120, 100, 0.9)'; ctx.stroke(removing);
+    ctx.setLineDash([]);
+    for (const r of w.rooms) {
+      let sx = 0, sy = 0, visible = false;
+      const edge = new Path2D();
+      for (const c of r.cells) {
+        const x = c % w.w, y = (c / w.w) | 0;
+        sx += x; sy += y;
+        if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+        visible = true;
+        const other = (dx, dy) => w.roomAt[(y + dy) * w.w + x + dx] !== r.id;
+        if (other(0, -1)) edge.rect(x * T, y * T, T, 1.5 * px);
+        if (other(0, 1)) edge.rect(x * T, (y + 1) * T - 1.5 * px, T, 1.5 * px);
+        if (other(-1, 0)) edge.rect(x * T, y * T, 1.5 * px, T);
+        if (other(1, 0)) edge.rect((x + 1) * T - 1.5 * px, y * T, 1.5 * px, T);
+      }
+      if (!visible) continue;
+      ctx.fillStyle = r.temp < COMFORT.min ? '#7cc4ff' : r.temp > COMFORT.max ? '#ff9a5c' : '#9be37a';
+      ctx.fill(edge);
+      const label = `${ROOM_ROLES[r.role]} ${ui.fmtTemp(r.temp)}${r.indoors ? '' : ' · open'}`; // details live in the room inspector
+      A.drawLabel(ctx, label, (sx / r.size + 0.5) * T, (sy / r.size + 0.5) * T);
     }
   }
 

@@ -1,7 +1,8 @@
 // Thoughts → mood → mental breaks. See docs/RESEARCH.md "Mood and mental breaks".
 
-import { BASE_MOOD, TICKS_PER_DAY, TICKS_PER_HOUR } from './config.js';
-import { TRAITS } from './defs.js';
+import { BASE_MOOD, TICKS_PER_DAY, TICKS_PER_HOUR, COMFORT } from './config.js';
+import { TRAITS, IMPRESSIVENESS } from './defs.js';
+import { roomOf, tempAt } from './rooms.js';
 import { mtbChance } from './rng.js';
 import { letter, allThings, dist } from './world.js';
 import { FOOD_HUNGRY, FOOD_URGENT, REST_DROWSY, REST_TIRED, REST_EXHAUSTED, JOY_LOW } from './pawn.js';
@@ -40,6 +41,20 @@ export const THOUGHTS = {
   sawTurn: { label: 'Watched a friend turn', mood: -12, days: 5, stack: 3 },
   survivedAttack: { label: 'We held them off', mood: 4, days: 1, stack: 1 },
   beatInfection: { label: 'Beat the infection', mood: 12, days: 4, stack: 1 },
+  // Temperature & rooms (RW-style)
+  cold: { label: 'Cold', mood: -5 },
+  hot: { label: 'Hot', mood: -5 },
+  hypothermia: { label: 'Hypothermia', mood: -10 },
+  heatstroke: { label: 'Heatstroke', mood: -10 },
+  cramped: { label: 'Cramped interior', mood: -3 },
+  sleptOutside: { label: 'Slept outside', mood: -3, days: 1, stack: 1 },
+  sleptCold: { label: 'Slept in the cold', mood: -4, days: 1, stack: 1 },
+  sleptHot: { label: 'Slept in the heat', mood: -4, days: 1, stack: 1 },
+  sleptInBarracks: { label: 'Slept in barracks', mood: -2, days: 1, stack: 1 },
+  ...Object.fromEntries(IMPRESSIVENESS.flatMap((l, i) => [
+    [`bedroom${i}`, { label: `${l.label} bedroom`, mood: l.mood, days: 1, stack: 1 }],
+    [`dining${i}`, { label: `Ate in a ${l.label.toLowerCase()} dining room`, mood: l.mood, days: 1, stack: 1 }],
+  ])),
   wasRescued: { label: 'Someone came back for me', mood: 6, days: 3, stack: 1 },
 };
 
@@ -62,7 +77,7 @@ const ignores = (p, key) => p.traits.some((t) => TRAITS[t].ignores?.includes(key
 
 export function addMemory(p, key) {
   const def = THOUGHTS[key];
-  if (!p.thoughts || ignores(p, key)) return;
+  if (!p.thoughts || !def.mood || ignores(p, key)) return;
   const same = p.thoughts.filter((t) => t.key === key);
   if (same.length >= def.stack) same[0].ticksLeft = def.days * TICKS_PER_DAY;
   else p.thoughts.push({ key, ticksLeft: def.days * TICKS_PER_DAY });
@@ -81,6 +96,13 @@ function situational(p, w) {
   else if (joy < JOY_LOW) out.push('bored');
   else if (joy > 0.9) out.push('joyFull');
   if (p.infection != null) out.push('infected');
+  const t = tempAt(w, p.x, p.y);
+  if ((p.hypothermia ?? 0) > 0.2) out.push('hypothermia');
+  else if (t < COMFORT.min) out.push('cold');
+  if ((p.heatstroke ?? 0) > 0.2) out.push('heatstroke');
+  else if (t > COMFORT.max) out.push('hot');
+  const room = roomOf(w, p.x, p.y);
+  if (room && room.size < 12) out.push('cramped');
   if (p.hp < p.maxHp * 0.5) out.push('inPain');
   if (allThings(w, (t, d) => d.corpse && dist(p, t) <= 6).length) out.push('corpsesNear');
   const exp = EXPECTATIONS.find(([cap]) => w.wealth < cap);

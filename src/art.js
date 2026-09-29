@@ -47,17 +47,33 @@ function outline(ctx, px, color = OUTLINE, width = 1) {
 
 // ---- Plants ---------------------------------------------------------------
 
-export function drawTree(ctx, t, px, lod) {
+// Canopy colors [base, highlight] by season. About a third of trees are evergreens and stay green.
+const EVERGREEN = ['#2f6440', '#40805a'];
+const DECIDUOUS = {
+  Spring: [['#3e763b', '#5a9a4c'], ['#366c38', '#4f8f45']],
+  Summer: [['#366c38', '#4a8a45'], ['#3e763b', '#539248']],
+  Autumn: [['#b8652a', '#d88a3c'], ['#a8792c', '#d0a445']],
+  Winter: [['#6e6356', '#857a6c'], ['#645a4f', '#7a7064']],
+};
+
+export function drawTree(ctx, t, px, lod, season = 'Summer') {
   const cx = (t.x + 0.5) * T, cy = (t.y + 0.5) * T;
-  const r = 7.6 * (0.45 + 0.55 * t.growth);
   const h = hash(t.id);
+  const bare = season === 'Winter' && h >= 0.33;
+  const r = 7.6 * (0.45 + 0.55 * t.growth) * (bare ? 0.8 : 1);
   const ox = (h - 0.5) * 2.4, oy = (hash(t.id + 7) - 0.5) * 2.4; // break up the grid
+  const [base, light] = h < 0.33 ? EVERGREEN : DECIDUOUS[season][h < 0.66 ? 0 : 1];
   ctx.fillStyle = SHADOW;
   ellipse(ctx, cx + ox + 2.6, cy + oy + 3.3, r * 1.02, r * 0.86);
-  ctx.fillStyle = h < 0.33 ? '#366c38' : h < 0.66 ? '#3e763b' : '#2f6440';
+  ctx.fillStyle = base;
   circle(ctx, cx + ox, cy + oy, r);
-  if (lod > 0) {
-    ctx.fillStyle = h < 0.33 ? '#4a8a45' : h < 0.66 ? '#539248' : '#40805a';
+  if (bare && lod > 0) { // winter branches instead of leaves
+    ctx.strokeStyle = '#4a3f35'; ctx.lineWidth = 0.9; ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let k = 0; k < 5; k++) { const a = (k / 5) * TAU + h * 3; ctx.moveTo(cx + ox, cy + oy); ctx.lineTo(cx + ox + Math.cos(a) * r * 0.85, cy + oy + Math.sin(a) * r * 0.85); }
+    ctx.stroke();
+  } else if (lod > 0) {
+    ctx.fillStyle = light;
     circle(ctx, cx + ox - r * 0.2, cy + oy - r * 0.24, r * 0.64);
     ctx.fillStyle = 'rgba(255, 255, 225, 0.13)';
     circle(ctx, cx + ox - r * 0.36, cy + oy - r * 0.4, r * 0.28);
@@ -399,24 +415,38 @@ export function drawBed(ctx, t, px) {
   ctx.fillStyle = '#fbfaf5'; rrect(ctx, x + 3.4, y + 2.4, T - 6.8, 3, 1.2); ctx.fill();
 }
 
-export function drawTable(ctx, t, px, lod) {
-  const x = t.x * T, y = t.y * T;
-  ctx.fillStyle = SHADOW; rrect(ctx, x + 3, y + 4, T - 2, T - 4, 2); ctx.fill();
-  ctx.fillStyle = '#a57a4c'; rrect(ctx, x + 1, y + 1.5, T - 2, T - 3, 2); ctx.fill(); outline(ctx, px, '#5b3d24');
-  if (lod > 1) {
+// Footprint-aware (2×1, rotatable). sw/sh in cells.
+export function drawTable(ctx, t, px, lod, sw = 1, sh = 1) {
+  const x = t.x * T, y = t.y * T, W = sw * T, H = sh * T;
+  ctx.fillStyle = SHADOW; rrect(ctx, x + 3, y + 4, W - 2, H - 4, 2); ctx.fill();
+  ctx.fillStyle = '#a57a4c'; rrect(ctx, x + 1, y + 1.5, W - 2, H - 3, 2); ctx.fill(); outline(ctx, px, '#5b3d24');
+  if (lod > 1) { // planks run the long way
     ctx.strokeStyle = 'rgba(80, 50, 25, 0.35)'; ctx.lineWidth = px;
-    ctx.beginPath(); ctx.moveTo(x + 1.5, y + 6); ctx.lineTo(x + T - 1.5, y + 6); ctx.moveTo(x + 1.5, y + 10); ctx.lineTo(x + T - 1.5, y + 10); ctx.stroke();
+    ctx.beginPath();
+    if (W >= H) for (const k of [1 / 3, 2 / 3]) { ctx.moveTo(x + 2, y + H * k); ctx.lineTo(x + W - 2, y + H * k); }
+    else for (const k of [1 / 3, 2 / 3]) { ctx.moveTo(x + W * k, y + 2); ctx.lineTo(x + W * k, y + H - 2); }
+    ctx.stroke();
   }
 }
 
-export function drawCampfire(ctx, t, now, px) {
+export function drawCampfire(ctx, t, now, px, lit = true) {
   const cx = (t.x + 0.5) * T, cy = (t.y + 0.5) * T;
   ctx.fillStyle = '#3b3530'; circle(ctx, cx, cy, 5.2);
   ctx.fillStyle = '#8d8a84';
   for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; circle(ctx, cx + Math.cos(a) * 6, cy + Math.sin(a) * 6, 1.6); }
-  ctx.strokeStyle = '#5e3c22'; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+  ctx.strokeStyle = lit ? '#5e3c22' : '#2e2622'; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(cx - 3.5, cy - 2.5); ctx.lineTo(cx + 3.5, cy + 2.5); ctx.moveTo(cx - 3.5, cy + 2.5); ctx.lineTo(cx + 3.5, cy - 2.5); ctx.stroke();
-  drawFlame(ctx, cx, cy, 1, now + t.id * 100);
+  if (lit) drawFlame(ctx, cx, cy, 1, now + t.id * 100);
+}
+
+// Squat iron stove with a glowing window and a flue pipe.
+export function drawStove(ctx, t, now, px, lit = true) {
+  const x = t.x * T, y = t.y * T;
+  ctx.fillStyle = SHADOW; rrect(ctx, x + 3.5, y + 4, T - 4, T - 4, 2); ctx.fill();
+  ctx.fillStyle = '#3d3f44'; rrect(ctx, x + 2, y + 2, T - 4, T - 4, 2); ctx.fill(); outline(ctx, px, '#17181b');
+  ctx.fillStyle = lit ? `rgba(255, ${150 + Math.sin(now / 90 + t.id) * 20 | 0}, 60, 0.95)` : '#232427';
+  rrect(ctx, x + 4.5, y + 7.5, T - 9, 4.5, 1); ctx.fill();
+  ctx.fillStyle = '#5a5d63'; circle(ctx, x + T - 5, y + 5, 1.8);
 }
 
 export function drawTorch(ctx, t, now, px) {
@@ -487,18 +517,18 @@ export function drawGuardPost(ctx, t, px, lod) {
   for (const [dx, dy] of [[0, 0], [T, 0], [0, T], [T, T]]) circle(ctx, x + dx - (dx ? 0.5 : -0.5), y + dy - (dy ? 0.5 : -0.5), 1.4);
 }
 
-export function drawBlueprint(ctx, t, px, fraction) {
-  const x = t.x * T, y = t.y * T;
+export function drawBlueprint(ctx, t, px, fraction, sw = 1, sh = 1) {
+  const x = t.x * T, y = t.y * T, W = sw * T, H = sh * T;
   ctx.fillStyle = 'rgba(96, 164, 255, 0.2)';
-  ctx.fillRect(x + 1.5, y + 1.5, T - 3, T - 3);
+  ctx.fillRect(x + 1.5, y + 1.5, W - 3, H - 3);
   ctx.strokeStyle = 'rgba(140, 195, 255, 0.95)';
   ctx.lineWidth = 1.3 * px;
   ctx.setLineDash([3 * px, 2.5 * px]);
-  ctx.strokeRect(x + 1.5, y + 1.5, T - 3, T - 3);
+  ctx.strokeRect(x + 1.5, y + 1.5, W - 3, H - 3);
   ctx.setLineDash([]);
   if (fraction > 0) {
     ctx.fillStyle = 'rgba(140, 195, 255, 0.95)';
-    ctx.fillRect(x + 3, y + T - 4.5, (T - 6) * fraction, 1.6);
+    ctx.fillRect(x + 3, y + H - 4.5, (W - 6) * fraction, 1.6);
   }
 }
 

@@ -15,6 +15,8 @@ import {
 import { makeZombie, traitMult, canFight, isGentle, learn } from './pawn.js';
 import { addMemory } from './mood.js';
 import { endJob, removePawn, dropCarried, stepMove, face, goTo, wait, DONE, FAIL } from './jobs.js';
+import { tempAt } from './rooms.js';
+import { zombieTempFactor } from './climate.js';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -166,7 +168,7 @@ function advanceStep(w, z) {
   const [nx, ny] = z.move.path[0];
   if (!zWalkable(w, nx, ny)) { z.move = null; return; } // something got built there
   const diag = nx !== z.x && ny !== z.y;
-  z.move.progress += (MOVE_CELLS_PER_TICK * z.speed) / (moveCost(w, nx, ny) * (diag ? Math.SQRT2 : 1));
+  z.move.progress += (MOVE_CELLS_PER_TICK * z.speed * zombieTempFactor(tempAt(w, z.x, z.y))) / (moveCost(w, nx, ny) * (diag ? Math.SQRT2 : 1));
   if (z.move.progress >= 1) {
     z.x = nx;
     z.y = ny;

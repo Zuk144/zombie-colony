@@ -23,10 +23,11 @@ export const THINGS = {
   wood: { kind: 'item', label: 'Wood', color: '#b07a45', stack: 75, value: 1.2 },
   stone: { kind: 'item', label: 'Stone blocks', color: '#b5b2aa', stack: 75, value: 0.9 },
   scrap: { kind: 'item', label: 'Scrap metal', color: '#8b98a6', stack: 50, value: 2.5 },
-  berries: { kind: 'item', label: 'Berries', color: '#c0405e', stack: 75, value: 1.5, nutrition: 0.05, foodPref: 40, tags: ['rawFood'] },
-  rice: { kind: 'item', label: 'Rice', color: '#e8e0c0', stack: 75, value: 1.1, nutrition: 0.05, foodPref: 40, tags: ['rawFood'] },
+  // rotDays (RW): days until spoiled at 10°C or warmer; slower when cool, frozen below 0°C.
+  berries: { kind: 'item', label: 'Berries', color: '#c0405e', stack: 75, value: 1.5, nutrition: 0.05, foodPref: 40, rotDays: 14, tags: ['rawFood'] },
+  rice: { kind: 'item', label: 'Rice', color: '#e8e0c0', stack: 75, value: 1.1, nutrition: 0.05, foodPref: 40, rotDays: 40, tags: ['rawFood'] },
   cannedFood: { kind: 'item', label: 'Canned food', color: '#c9523a', stack: 20, value: 6, nutrition: 0.35, foodPref: 12, tags: ['preserved'] },
-  meal: { kind: 'item', label: 'Simple meal', color: '#e6b24c', stack: 10, value: 15, nutrition: 0.9, foodPref: 0, tags: ['meal'] },
+  meal: { kind: 'item', label: 'Simple meal', color: '#e6b24c', stack: 10, value: 15, nutrition: 0.9, foodPref: 0, rotDays: 4, tags: ['meal'] },
   medkit: { kind: 'item', label: 'Medical kit', color: '#e9e7e2', stack: 10, value: 30, medicine: 1 },
   herbs: { kind: 'item', label: 'Herbal medicine', color: '#7fb069', stack: 20, value: 10, medicine: 0.6 },
   ammo: { kind: 'item', label: 'Ammo', color: '#d6ad45', stack: 100, value: 1.5 },
@@ -55,8 +56,11 @@ export const THINGS = {
   spikeTrap: { kind: 'building', label: 'Spike trap', trap: { damage: [35, 55] }, hp: 60, cost: { wood: 15 }, work: 250, rearmWork: 150 },
   guardPost: { kind: 'building', label: 'Watchtower', guardPost: true, sightBonus: 7, rangeBonus: 3, hp: 200, cost: { wood: 35 }, work: 700 },
   bed: { kind: 'building', label: 'Bed', bed: true, restEffect: 1, hp: 120, cost: { wood: 45 }, work: 800 },
-  table: { kind: 'building', label: 'Table', table: true, hp: 120, cost: { wood: 30 }, work: 400 },
-  campfire: { kind: 'building', label: 'Campfire', bench: true, light: 7, recipes: ['simpleMeal'], hp: 80, cost: { wood: 20 }, work: 300 },
+  table: { kind: 'building', label: 'Table', table: true, size: [2, 1], rotatable: true, hp: 120, cost: { wood: 30 }, work: 400 },
+  // Fuel: burns `perDay` wood while active; haulers (or the cook) refill it. heat: °C·cells per hour
+  // added to the room until `heatTarget` (a thermostat).
+  campfire: { kind: 'building', label: 'Campfire', bench: true, light: 7, recipes: ['simpleMeal'], fuel: { capacity: 25, perDay: 10 }, heat: 40, heatTarget: 28, hp: 80, cost: { wood: 20 }, work: 300 },
+  woodStove: { kind: 'building', label: 'Wood stove', light: 3, fuel: { capacity: 40, perDay: 16 }, heat: 90, heatTarget: 21, idleWhenWarm: true, hp: 160, cost: { wood: 10, scrap: 20 }, work: 700 },
   workbench: { kind: 'building', label: 'Workbench', bench: true, recipes: ['ammo', 'machete', 'pistol', 'rifle'], hp: 150, cost: { wood: 40, scrap: 10 }, work: 900 },
   burnPit: { kind: 'building', label: 'Burn pit', bench: true, light: 4, recipes: ['burnCorpses'], hp: 120, cost: { wood: 25 }, work: 300 },
   torch: { kind: 'building', label: 'Torch', light: 5, hp: 40, cost: { wood: 4 }, work: 80 },
@@ -102,6 +106,21 @@ export const SCHEDULE_SLOTS = [
 ];
 
 export const CROPS = ['riceCrop', 'herbPlant'];
+
+// (RW) room impressiveness levels and the mood for sleeping in a bedroom / eating in a dining room of that level.
+export const IMPRESSIVENESS = [
+  { min: -Infinity, label: 'Awful', mood: -2 },
+  { min: 20, label: 'Dull', mood: 0 },
+  { min: 30, label: 'Mediocre', mood: 1 },
+  { min: 40, label: 'Decent', mood: 2 },
+  { min: 50, label: 'Slightly impressive', mood: 3 },
+  { min: 65, label: 'Somewhat impressive', mood: 4 },
+  { min: 85, label: 'Very impressive', mood: 5 },
+  { min: 120, label: 'Extremely impressive', mood: 6 },
+  { min: 170, label: 'Unbelievably impressive', mood: 7 },
+  { min: 240, label: 'Wondrously impressive', mood: 8 },
+];
+export const ROOM_ROLES = { bedroom: 'Bedroom', barracks: 'Barracks', dining: 'Dining room', kitchen: 'Kitchen', workshop: 'Workshop', room: 'Room' };
 
 export const TRAITS = {
   steadfast: { label: 'Steadfast', breakOffset: -9 },

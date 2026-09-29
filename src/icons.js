@@ -47,6 +47,13 @@ const P = {
   drop: '<path d="M12 3c3.5 4.5 6 7.6 6 11a6 6 0 0 1-12 0c0-3.4 2.5-6.5 6-11z"/>',
   gun: '<path d="M3 9h15l2 2v2H9l-1 6H5l1-6H3z"/>',
   blade: '<path d="M4 20l3-3M7 17L19 5l-1 5-8 9z"/>',
+  woodStove: '<rect x="5" y="9" width="14" height="11" rx="1.5"/><path d="M8 14h8M15 9V3h3v6"/>',
+  roof: '<path d="M3 12l9-7 9 7"/><path d="M6 10v9h12v-9"/>',
+  noRoof: '<path d="M6 10v9h12v-9"/><path d="M3 12l3-2.3M21 12l-3-2.3" stroke-dasharray="2 2"/><path d="M4 4l16 16"/>',
+  autoRoof: '<path d="M3 12l9-7 9 7"/><path d="M9 17a3 3 0 1 0 1-4.5L8.5 14M8.5 11.5V14H11"/>',
+  layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
+  thermo: '<path d="M10 14V5a2 2 0 0 1 4 0v9a4 4 0 1 1-4 0z"/><path d="M12 11v5"/>',
+  rotate: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>',
 };
 
 export const icon = (name, cls = '') =>

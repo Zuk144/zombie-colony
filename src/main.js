@@ -31,6 +31,8 @@ else if (!params.has('seed') && boot !== 'new') letter(w, 'Welcome back.', 'neut
 const renderer = createRenderer(document.getElementById('view'), w);
 const ui = createUI(w, renderer);
 document.getElementById('menuBtn').innerHTML = icon('help');
+document.getElementById('layersBtn').innerHTML = icon('layers');
+document.getElementById('toolRotate').innerHTML = icon('rotate');
 
 // Start centered on camp, ~34 cells across (closer on small screens).
 const { W } = renderer.size();

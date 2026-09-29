@@ -9,6 +9,8 @@ import { startJob, tickJob, endJob, FAIL } from './jobs.js';
 import { think, shouldInterrupt } from './think.js';
 import { tickZombie, updateZombieField, scanThreat, tickCorpses } from './combat.js';
 import { tickHealth } from './medical.js';
+import { tickClimate, tickExposure, tickRot, tickFrost, outdoorTemp, plantGrowthFactor } from './climate.js';
+import { tickBuildings } from './buildings.js';
 import { createDirector, tickDirector } from './director.js';
 import { generateMap } from './mapgen.js';
 
@@ -26,6 +28,7 @@ export function newGame(seed) {
   w.story = createDirector();
   w.wealth = colonyWealth(w);
   w.humans = [];
+  w.outdoor = outdoorTemp(w);
   letter(w, 'Three survivors made camp in a clearing. The dead are out there. Plan well.', 'neutral', { x: cx, y: cy });
   return w;
 }
@@ -43,7 +46,11 @@ export function tickWorld(w) {
     else tickPawn(w, p);
   }
   if (w.tick % RARE_TICK === 0) {
+    tickClimate(w, RARE_TICK);
+    tickBuildings(w, RARE_TICK);
     growPlants(w, RARE_TICK);
+    tickFrost(w, RARE_TICK);
+    tickRot(w, RARE_TICK);
     tickCorpses(w);
   }
   if (w.tick % STORY_INTERVAL === 0) {
@@ -80,15 +87,22 @@ function tickPawn(w, p) {
     tickNeeds(p, RARE_TICK);
     tickMood(p, w, RARE_TICK);
     tickHealth(w, p, RARE_TICK);
+    if (!p.gone) tickExposure(w, p, RARE_TICK);
     if (!p.gone && shouldInterrupt(w, p)) p.interrupt = true;
   } else if (p.faction === 'looter' && w.tick > p.leaveAt && p.job?.def !== 'leave') p.interrupt = true;
 }
 
+// Plants need warmth and open sky (grow lamps for indoor farms are a Phase 3 machine).
 function growPlants(w, dt) {
+  const warmth = plantGrowthFactor(w.outdoor);
+  if (warmth <= 0) return;
   for (const t of w.things.values()) {
     const d = THINGS[t.def];
     if (d.kind !== 'plant' || t.growth >= 1) continue;
-    const fert = TERRAIN[w.terrain[idx(w, t.x, t.y)]].fertility;
-    t.growth = Math.min(1, t.growth + (dt / (d.growDays * TICKS_PER_DAY)) * fert);
+    const i = idx(w, t.x, t.y);
+    if (w.roof[i]) continue;
+    const fert = TERRAIN[w.terrain[i]].fertility;
+    t.growth = Math.min(1, t.growth + (dt / (d.growDays * TICKS_PER_DAY)) * fert * warmth);
+    t.frost = 0;
   }
 }

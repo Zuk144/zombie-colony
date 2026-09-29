@@ -8,8 +8,11 @@ import { CARRY_CAPACITY } from './config.js';
 import { THINGS, RECIPES, WORK_TYPES, ingKey, ingMatches } from './defs.js';
 import { allThings, canReach, canReachThing, reservedByOther, tkey, ckey, dist, countOwned, plantAt, buildingAt, blueprintAt, itemAt, colonists } from './world.js';
 import { findStorageCell } from './zones.js';
-import { haulJob, deliverJob, buildJob, repairJob, rearmJob, salvageJob, mineJob, cutJob, sowJob, billJob } from './jobs.js';
+import { haulJob, deliverJob, buildJob, repairJob, rearmJob, salvageJob, mineJob, cutJob, sowJob, billJob, roofJob, refuelJob } from './jobs.js';
 import { needsTending, rescueJob, tendJob, bestMedicine, pkey } from './medical.js';
+import { roofTargets } from './rooms.js';
+import { hasFuel, needsRefuel } from './buildings.js';
+import { growingSeason } from './climate.js';
 
 const free = (w, p, t) => !reservedByOther(w, tkey(t), p) && canReachThing(w, p, t);
 
@@ -33,6 +36,12 @@ function billWanted(w, bill) {
   return countOwned(w, r.product.def) < bill.target;
 }
 
+function refuel(w, p, t) {
+  const wood = nearestItem(w, p, (it) => it.def === 'wood');
+  const room = Math.floor(THINGS[t.def].fuel.capacity - (t.fuel ?? 0));
+  return wood && room > 0 ? refuelJob(w, wood, t, Math.min(room, CARRY_CAPACITY)) : null;
+}
+
 // Don't send people out to patch a wall (or grab a body) while zombies are right there.
 const zombieNear = (w, t, r = 3) => w.pawns.some((z) => z.faction === 'zombie' && dist(z, t) <= r);
 
@@ -45,6 +54,7 @@ const billGiver = (workType) => ({
     for (const bill of bench.bills) {
       const r = RECIPES[bill.recipe];
       if (r.workType !== workType || !billWanted(w, bill)) continue;
+      if (!hasFuel(bench)) return refuel(w, p, bench); // no fire, no cooking: the cook fetches wood
       const missing = r.ingredients.find((ing) => (bench.stock[ingKey(ing)] ?? 0) < ing.count);
       if (!missing) return billJob(w, bench, bill);
       const item = nearestItem(w, p, (t) => ingMatches(missing, t) && !zombieNear(w, t), (t) => (t.reanimateAt ? 60 : 0));
@@ -81,6 +91,10 @@ export const GIVERS = {
       job: (w, p, t) => (free(w, p, t) && !zombieNear(w, t) ? rearmJob(w, t) : null),
     },
     {
+      targets: (w) => roofTargets(w),
+      job: (w, p, c) => (!reservedByOther(w, 'r' + c.i, p) && canReach(w, p, c.x, c.y, true) ? roofJob(w, c.x, c.y, c.remove) : null),
+    },
+    {
       targets: (w) => allThings(w, (t, d) => d.kind === 'blueprint' && missingMaterials(t)),
       job(w, p, bp) {
         if (!free(w, p, bp)) return null;
@@ -109,11 +123,12 @@ export const GIVERS = {
     {
       targets(w) {
         const out = [];
+        if (!growingSeason(w)) return out; // no sowing outside the growing season (a warm winter afternoon doesn't count)
         for (const z of w.zones) {
           if (z.type !== 'grow') continue;
           for (const i of z.cells) {
             const x = i % w.w, y = (i / w.w) | 0;
-            if (!plantAt(w, x, y) && !buildingAt(w, x, y) && !blueprintAt(w, x, y) && !itemAt(w, x, y)) out.push({ x, y, crop: z.crop });
+            if (!w.roof[i] && !plantAt(w, x, y) && !buildingAt(w, x, y) && !blueprintAt(w, x, y) && !itemAt(w, x, y)) out.push({ x, y, crop: z.crop });
           }
         }
         return out;
@@ -136,6 +151,10 @@ export const GIVERS = {
 
   hauling: [
     billGiver('hauling'), // burn pit
+    {
+      targets: (w) => allThings(w, (t) => needsRefuel(t)),
+      job: (w, p, t) => (free(w, p, t) ? refuel(w, p, t) : null),
+    },
     {
       targets: (w) => allThings(w, (t, d) => d.kind === 'item'),
       job(w, p, item) {

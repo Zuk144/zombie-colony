@@ -4,6 +4,8 @@
 // Storage lives only in this module so an App Store wrapper can swap it out later.
 
 import { createWorld, restoreThing, spawnItem } from './world.js';
+import { outdoorTemp } from './climate.js';
+import { rebuildRooms } from './rooms.js';
 
 const VERSION = 1;
 const KEYS = { auto: 'holdout.autosave', manual: 'holdout.save' };
@@ -29,7 +31,16 @@ export function serialize(w) {
     zoneCounter: w.zoneCounter, roads: w.roads, nextId: w.nextId,
     log: w.log, logSerial: w.logSerial, wealth: w.wealth, story: w.story, stats: w.stats,
     alarm: w.alarm, autoAlarm: w.autoAlarm,
+    roofs: sparse(w.roof), roofArea: sparse(w.roofArea), weather: w.weather,
+    roomTemps: w.rooms.map((r) => [r.cells[0], Math.round(r.temp * 10) / 10]),
   });
+}
+
+// [[index, value], ...] for the non-zero cells of a per-cell array.
+function sparse(arr) {
+  const out = [];
+  for (let i = 0; i < arr.length; i++) if (arr[i]) out.push([i, arr[i]]);
+  return out;
 }
 
 export function deserialize(json) {
@@ -43,6 +54,11 @@ export function deserialize(json) {
     alarm: d.alarm, autoAlarm: d.autoAlarm,
   });
   w.terrain.set(d.terrain);
+  for (const [i, v] of d.roofs ?? []) w.roof[i] = v;
+  for (const [i, v] of d.roofArea ?? []) w.roofArea[i] = v;
+  w.weather = d.weather ?? null;
+  w.outdoor = outdoorTemp(w);
+  w.pendingRoomTemps = new Map(d.roomTemps ?? []);
   for (const t of d.things) restoreThing(w, t);
   for (const z of d.zones) {
     z.cells = new Set(z.cells);
@@ -60,6 +76,7 @@ export function deserialize(json) {
   w.reachDirty = true;
   w.fieldDirty = true;
   w.humans = [];
+  rebuildRooms(w); // rooms (and their saved temperatures) exist from the first frame
   return w;
 }
 

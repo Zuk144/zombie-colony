@@ -64,6 +64,21 @@ export const INFECTION = {
   tendSlows: 0.6, // tended severity gain × (1 − tendSlows × quality)
   tendImmunityBoost: 0.5, // tended immunity gain × (1 + boost × quality)
 };
+// Climate (temperate). Outdoor °C = mean + season sine + day/night sine + weather.
+export const CLIMATE = {
+  mean: 11,
+  seasonAmp: 15, // summer afternoons up to ~32°C, winter nights down to ~−10°C
+  dayAmp: 6, // afternoons warmer, 3am coldest
+  phaseDays: 3, // shifts the year so day 1 starts in a mild early spring
+  leakRoofed: 0.15, // per hour: how fast a roofed room drifts toward outdoor temperature
+  leakOpen: 1.2, // a room under 75% roofed is basically outdoors (RW)
+};
+// Survivors wear ordinary clothes, so a little wider than RW's naked 16–26°C.
+export const COMFORT = { min: 8, max: 28 };
+// (RW) exposure severity per 60 ticks, once 10°C past the comfortable range.
+export const EXPOSURE = { onset: 10, base: 0.00075, perDegree: 0.0000645, recoverMin: 0.0015, recoverMax: 0.015, recoverMul: 0.027 };
+export const ROOMS = { maxCells: 400, maxAutoRoof: 160, supportRange: 6, enclosedRoofed: 0.75, roofWork: 65 }; // (RW) 6-tile support, 75% roofed, 65 ticks
+
 export const REANIMATE_DAYS = [0.08, 0.2]; // the dead rise again after this long
 export const ZOMBIE_CORPSE_ROT_DAYS = 2.5;
 export const MAX_ZOMBIES = 160;

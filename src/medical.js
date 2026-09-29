@@ -43,6 +43,14 @@ export function tickHealth(w, p, dt) {
     }
   }
 
+  // Starvation (RW malnutrition, simplified): no food means no healing and slow wasting away.
+  if (p.needs.food <= 0) {
+    p.hp -= 12 * days;
+    if (p.hp <= 0) return killHuman(w, p, 'starved to death');
+    if (!p.downed && p.hp < SURVIVOR.downedBelow) goDown(w, p);
+    return;
+  }
+
   // Healing: faster lying down, in a bed, and when tended; stalls while bleeding hard.
   const rate = SURVIVOR.healPerDay
     * (p.asleep || p.downed || p.lying ? 3 : 1)
