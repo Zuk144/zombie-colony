@@ -18,7 +18,8 @@ import { isTended } from './medical.js';
 import { setAlarm } from './think.js';
 import { roomOf, tempAt } from './rooms.js';
 import { plantGrowthFactor, rotFactor, exposureStage, seasonOf } from './climate.js';
-import { hasFuel } from './buildings.js';
+import { hasFuel, supplies, isRunning, dinLabel } from './buildings.js';
+import { isPowered, wantsPower, netOf, modeAllows } from './power.js';
 import { threatPoints, debugIncidents, colonyCenter } from './director.js';
 import { saveGame, saveInfo } from './save.js';
 import { createInput } from './input.js';
@@ -46,11 +47,23 @@ const BUILD_HINTS = {
   campfire: 'Cooks raw food into meals. Set bills in the inspector.',
   workbench: 'Makes ammo, machetes, and guns from scrap. Add bills in the inspector.',
   burnPit: 'Burns bodies so they can never rise. Haulers bring the dead here.',
+  fence: 'Drag a line or rectangle. Cheap and see-through. A lone zombie only rattles it; it takes 3 or more to push it over.',
+  electricFence: 'Like a fence, but it shocks and staggers attackers while it has power. Needs a power pole nearby.',
+  gate: 'A door for fences: survivors pass, zombies don’t.',
+  powerPole: 'Powers everything within 6 squares. Poles within 8 squares link into one grid.',
+  generator: 'Burns biofuel or wood for 1000 W, only while something needs power. Loud: the Din draws zombies.',
+  solarPanel: '400 W in daylight, silent. Nothing at night or under a roof; pair it with a battery.',
+  battery: 'Stores surplus power for nights and brownouts. Tap ↻ to rotate.',
+  floodlight: 'Lights 11 squares at night so guards can see zombies there. The light draws them in.',
+  siren: 'A lure: pulls idle zombies from 40 squares away, then they wreck it. Put it outside the fence with traps and a turret.',
+  autoTurret: 'Shoots zombies within 13 squares while powered. Haulers load its ammo. Loud.',
+  ammoPress: 'Turns scrap into ammo on its own while powered. Haulers keep it stocked.',
+  renderVat: 'Turns zombie corpses into biofuel for generators. Bodies put in here never rise. Tap ↻ to rotate.',
 };
 
 export function createUI(w, r) {
   const $ = (id) => document.getElementById(id);
-  const ui = { tool: null, selected: null, drag: null, hover: null, ripples: [], openCat: null, workTab: 'priorities', paintSlot: 'guard', rot: 0, overlay: false };
+  const ui = { tool: null, selected: null, drag: null, hover: null, ripples: [], openCat: null, workTab: 'priorities', paintSlot: 'guard', rot: 0, overlay: null };
 
   // Per-device preferences (not part of the save).
   const prefs = (() => { try { return JSON.parse(localStorage.getItem('holdout.prefs')) ?? {}; } catch { return {}; } })();
@@ -112,7 +125,8 @@ export function createUI(w, r) {
         ok: (x, y) => inBounds(w, x, y) && thingsAt(w, x, y).some((t) => t.designation || THINGS[t.def].kind === 'blueprint'),
         apply: (cells) => cells.forEach(([x, y]) => cancelAt(x, y)) },
     ] },
-    { key: 'build', label: 'Build', icon: 'build', tools: ['wall', 'stoneWall', 'scrapWall', 'barricade', 'door', 'spikeTrap', 'guardPost', 'torch'].map(build) },
+    { key: 'build', label: 'Build', icon: 'build', tools: ['wall', 'stoneWall', 'scrapWall', 'fence', 'electricFence', 'gate', 'barricade', 'door', 'spikeTrap', 'guardPost', 'torch'].map(build) },
+    { key: 'machines', label: 'Machines', icon: 'machine', tools: ['powerPole', 'generator', 'solarPanel', 'battery', 'floodlight', 'siren', 'autoTurret', 'ammoPress', 'renderVat'].map(build) },
     { key: 'furnish', label: 'Furnish', icon: 'bed', tools: ['bed', 'table', 'campfire', 'woodStove', 'workbench', 'burnPit'].map(build) },
     { key: 'zones', label: 'Zones', icon: 'zones', tools: [
       { key: 'zone:stockpile', label: 'Stockpile', icon: 'stockpile', hotkey: 'z', hint: 'Drag an area. Haulers bring items here.', ...zone('stockpile') },
@@ -224,7 +238,18 @@ export function createUI(w, r) {
   });
   $('toolDone').addEventListener('click', () => setTool(null));
   $('toolRotate').addEventListener('click', () => { ui.rot = (ui.rot + 1) % 2; });
-  $('layersBtn').addEventListener('click', () => { ui.overlay = !ui.overlay; });
+  // Layers button cycles overlays: rooms & roofs → secure yard → power → off.
+  const OVERLAYS = [null, 'rooms', 'yard', 'power'];
+  const OVERLAY_NAMES = { rooms: 'Rooms, roofs & temperature', yard: 'Secure yard: green is safe from zombies', power: 'Power grids: reach, links, supply / demand' };
+  const setOverlay = (o) => {
+    ui.overlay = o;
+    const chip = $('overlayChip');
+    chip.hidden = !o;
+    chip.textContent = o ? OVERLAY_NAMES[o] : '';
+    chip.style.animation = 'none'; void chip.offsetWidth; chip.style.animation = ''; // replay the fade
+  };
+  $('layersBtn').addEventListener('click', () => setOverlay(OVERLAYS[(OVERLAYS.indexOf(ui.overlay) + 1) % OVERLAYS.length]));
+  $('yardChip').addEventListener('click', () => setOverlay(ui.overlay === 'yard' ? null : 'yard'));
   $('temp').addEventListener('click', () => { prefs.fahrenheit = !prefs.fahrenheit; savePrefs(); });
   $('toolChip').querySelector('.tc-icon').addEventListener('click', () => openTray(CATEGORIES.find((c) => c.tools.includes(TOOL[ui.tool]))?.key));
 
@@ -449,6 +474,7 @@ export function createUI(w, r) {
         <li>Wounds <b>bleed</b> until a <b>doctor</b> treats them. A <b>bite</b> starts a race between infection and immunity: a bed, a doctor, and medicine usually win it.</li>
         <li><b>Everyone who dies rises again.</b> Build a <b>burn pit</b>; haulers rush bodies there.</li>
         <li>The <b>alarm</b> (bell) sends fighters to watchtowers and everyone else to shelter. The <b>Schedule</b> tab sets night watches.</li>
+        <li><b>Machines make noise</b> (the Din). A loud colony draws more zombies, and zombies drawn by a machine go wreck it. <b>Fences</b> keep stragglers out: one zombie just rattles a fence, it takes three or more to push it over. The shield chip shows your secure yard. A <b>siren</b> outside the fence lures the dead into a kill zone; a <b>render vat</b> turns their corpses into fuel. Machines need <b>components</b>, salvaged from wrecked cars and ruins.</li>
         <li><b>Seasons</b> matter: crops only grow when it's warm and die in frost, food spoils unless it's kept cold, and winter nights can freeze people. Enclosed rooms get <b>roofed</b> automatically; a roofed room with a <b>wood stove</b> stays warm. The layers button shows rooms, roofs, and temperatures.</li>
         <li>Keyboard: Space pause · 1/2/3 speed · Tab work · B alarm · C chop · H harvest · M mine · V salvage · X cancel · Z stockpile · G grow · WASD pan.</li>
       </ul>
@@ -489,6 +515,11 @@ export function createUI(w, r) {
     else if (act === 'designate' && t) t.designation = b.dataset.kind;
     else if (act === 'clear' && t) t.designation = null;
     else if (act === 'cancelBp' && t) cancelAt(t.x, t.y);
+    else if (act === 'machineMode' && t) {
+      // An electric fence switches its whole line (every electric fence on the same grid).
+      const net = THINGS[t.def].electric && netOf(w, t);
+      for (const f of net ? net.members.filter((m) => m.def === t.def) : [t]) f.mode = b.dataset.mode;
+    }
     else if (s?.zone) {
       const z = s.zone;
       if (act === 'prio') z.priority = Math.min(5, Math.max(1, z.priority + +b.dataset.dir));
@@ -496,7 +527,7 @@ export function createUI(w, r) {
       if (act === 'crop') z.crop = b.dataset.def;
     } else if (t?.bills) {
       const i = +b.dataset.bill, bill = t.bills[i];
-      if (act === 'target') bill.target = Math.max(1, bill.target + +b.dataset.dir * (bill.recipe === 'ammo' ? 15 : 1));
+      if (act === 'target') bill.target = Math.max(1, bill.target + +b.dataset.dir * (RECIPES[bill.recipe].product?.def === 'ammo' ? 15 : 1));
       if (act === 'mode') bill.mode = bill.mode === 'until' ? 'forever' : 'until';
       if (act === 'pause') bill.paused = !bill.paused;
       if (act === 'removeBill') t.bills.splice(i, 1);
@@ -621,11 +652,35 @@ export function createUI(w, r) {
     return `<h4>Bills</h4>${bills}<h4>Add bill</h4><div class="chips add">${add}</div>`;
   }
 
+  // Fuel and ammo bars for anything haulers keep supplied.
   function fuelHTML(t, d) {
-    if (!d.fuel) return '';
-    const f = t.fuel ?? 0;
-    return `<div class="need"><span>Wood</span>${bar(f / d.fuel.capacity, f < d.fuel.capacity * 0.2 ? 'low' : '')}<em>${Math.round(f)}</em></div>
-      ${hasFuel(t) ? '' : '<p class="alert-line">Out of wood. Haulers (or the cook) will refill it.</p>'}`;
+    return supplies(t).map((sl) => {
+      const v = t[sl.field] ?? 0;
+      const name = sl.field === 'ammo' ? 'Ammo' : sl.items.length > 1 ? 'Fuel' : 'Wood';
+      const empty = v <= 0 ? `<p class="alert-line">${sl.field === 'ammo' ? 'Out of ammo. Haulers will load it.' : `Out of ${name.toLowerCase()}. Haulers${d.bench && !d.machine ? ' (or the cook)' : ''} will refill it.`}</p>` : '';
+      return `<div class="need"><span>${name}</span>${bar(v / sl.capacity, v < sl.capacity * 0.2 ? 'low' : '')}<em>${Math.round(v)}</em></div>${empty}`;
+    }).join('');
+  }
+
+  // Power status, the On / Day only / Off switch, battery, grid numbers, and noise.
+  function machineHTML(t, d) {
+    const net = netOf(w, t);
+    const powered = isPowered(w, t);
+    let status;
+    if (t.broken) status = '<p class="alert-line">Wrecked. A builder will repair it when no zombies are near.</p>';
+    else if (d.power?.draw && !net) status = '<p class="alert-line">No power pole within 6 squares.</p>';
+    else if (d.power?.draw && !net.powered) status = '<p class="alert-line">Brownout: its grid doesn’t have enough power.</p>';
+    else status = '';
+    const running = isRunning(w, t);
+    const state = t.broken ? 'Wrecked' : d.power?.solar ? 'Solar: power in daylight, silent'
+      : d.power?.output ? (running ? `Running · ${d.power.output} W` : 'Idle: nothing needs power')
+      : d.power?.storage ? `${Math.round(t.charge ?? 0)} / ${d.power.storage} Wd stored`
+      : d.power?.draw ? (powered && wantsPower(w, t) ? `On · ${d.power.draw} W` : modeAllows(w, t) ? (d.bench ? 'Waiting for supplies' : 'Standby') : 'Switched off') : '';
+    const modes = (d.power?.draw || (d.fuel && d.power)) && !d.power?.storage
+      ? `<div class="row"><span>Runs</span><div class="chips">${[['on', 'Always'], ['day', 'Day only'], ['off', 'Off']].map(([m, l]) => `<button data-act="machineMode" data-mode="${m}" class="${(t.mode ?? 'on') === m ? 'on' : ''}">${l}</button>`).join('')}</div></div>` : '';
+    const grid = net ? `<p class="hint">Grid: ${net.supply} W supply / ${net.demand} W demand${net.capacity ? ` · batteries ${Math.round((100 * net.stored) / net.capacity)}%` : ''}.</p>` : '';
+    const noise = d.noise ? `<p class="hint">${icon('noise')} Noise ${d.noise} squares${running ? ' (running now: it’s drawing zombies)' : ''}.</p>` : '';
+    return `${status}<p class="doing">${state}</p>${modes}${grid}${noise}`;
   }
 
   function spoilHTML(t, d) {
@@ -665,6 +720,7 @@ export function createUI(w, r) {
       const mats = Object.entries(bd.cost).map(([k, n]) => `<li><span>${THINGS[k].label}</span><span>${t.stock[k] ?? 0} / ${n}</span></li>`).join('');
       return head(`${bd.label}`, 'Blueprint') + `<ul class="thoughts">${mats}</ul><p class="hint">Builders deliver materials, then construct.</p>` + actions(t);
     }
+    if (d.machine || d.pole || d.electric) return head(d.label, BUILD_HINTS[t.def] ?? '') + hp + machineHTML(t, d) + fuelHTML(t, d) + (d.bench ? billsHTML(t, d) : '') + actions(t);
     if (d.bench) return head(d.label, BUILD_HINTS[t.def] ?? '') + hp + fuelHTML(t, d) + billsHTML(t, d) + actions(t);
     if (d.fuel) return head(d.label, BUILD_HINTS[t.def] ?? '') + hp + fuelHTML(t, d) + actions(t);
     if (d.trap) return head(d.label, t.armed ? 'Armed' : 'Sprung, waiting to be reset') + hp + actions(t);
@@ -695,7 +751,11 @@ export function createUI(w, r) {
     $('temp').innerHTML = `${icon('thermo')}<b>${ui.fmtTemp(w.outdoor)}</b>${weather ? `<span class="dim">${weather}</span>` : ''}`;
     $('temp').classList.toggle('cold', w.outdoor < COMFORT.min - 10);
     $('temp').classList.toggle('hot', w.outdoor > COMFORT.max + 6);
-    $('layersBtn').classList.toggle('on', ui.overlay);
+    $('layersBtn').classList.toggle('on', !!ui.overlay);
+    const yard = $('yardChip');
+    yard.hidden = !w.secureCount && !w.breach;
+    yard.classList.toggle('danger', !!w.breach);
+    yard.innerHTML = `${icon('shield')}<span>${w.breach ? `Breach: ${w.breach} inside` : `Secure ${w.secureCount}`}</span>`;
 
     const hunting = w.pawns.filter((p) => p.faction === 'zombie' && p.state === 'hunt').length;
     $('threat').hidden = !hunting;
@@ -703,7 +763,8 @@ export function createUI(w, r) {
     $('alarm').classList.toggle('on', w.alarm);
     $('alarm').innerHTML = `${icon('bell')}<span>${w.alarm ? 'Alarm on' : 'Alarm'}</span>`;
     const zCount = w.pawns.filter((p) => p.faction === 'zombie').length;
-    $('stats').innerHTML = `${icon('zombie')}<b>${zCount}</b><span class="dim">· $${w.wealth.toLocaleString()} · threat ${threatPoints(w)}</span>`;
+    const din = dinLabel(w.din ?? 0);
+    $('stats').innerHTML = `${icon('zombie')}<b>${zCount}</b><span class="din din-${din.toLowerCase()}">${icon('noise')}${din}</span><span class="dim">· threat ${threatPoints(w)}</span>`;
 
     const roster = colonists(w).map((p) => {
       const st = p.downed ? 'down' : p.infection ? 'infected' : p.mental ? 'mental' : p.asleep ? 'asleep' : p.job?.kind === 'combat' ? 'combat' : '';

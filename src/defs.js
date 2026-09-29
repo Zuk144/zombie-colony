@@ -31,6 +31,8 @@ export const THINGS = {
   medkit: { kind: 'item', label: 'Medical kit', color: '#e9e7e2', stack: 10, value: 30, medicine: 1 },
   herbs: { kind: 'item', label: 'Herbal medicine', color: '#7fb069', stack: 20, value: 10, medicine: 0.6 },
   ammo: { kind: 'item', label: 'Ammo', color: '#d6ad45', stack: 100, value: 1.5 },
+  components: { kind: 'item', label: 'Components', color: '#5fb3a1', stack: 20, value: 14 },
+  biofuel: { kind: 'item', label: 'Biofuel', color: '#8fae3a', stack: 50, value: 2 },
   machete: { kind: 'item', label: 'Machete', color: '#b9c2c9', stack: 1, value: 35, weapon: { melee: true, damage: [17, 25], cooldown: 75, rank: 2 } },
   pistol: { kind: 'item', label: 'Pistol', color: '#3a3d42', stack: 1, value: 120, weapon: { ranged: true, damage: [20, 28], cooldown: 65, range: 11, accuracy: 0.72, noise: 22, rank: 3 } },
   rifle: { kind: 'item', label: 'Hunting rifle', color: '#6b4a2e', stack: 1, value: 220, weapon: { ranged: true, damage: [32, 44], cooldown: 120, range: 19, accuracy: 0.84, noise: 32, rank: 4 } },
@@ -45,7 +47,7 @@ export const THINGS = {
   // Natural / pre-apocalypse structures
   rock: { kind: 'building', label: 'Rock', natural: true, blocks: true, mineWork: 900, yield: { def: 'stone', count: 10 } },
   ruinWall: { kind: 'building', label: 'Ruined wall', ruin: true, wallLike: true, blocks: true, hp: 250, salvage: { work: 400, yield: [['stone', 4], ['scrap', 1]] } },
-  car: { kind: 'building', label: 'Wrecked car', ruin: true, blocks: true, hp: 600, size: [2, 1], salvage: { work: 900, yield: [['scrap', 25]] } },
+  car: { kind: 'building', label: 'Wrecked car', ruin: true, blocks: true, hp: 600, size: [2, 1], salvage: { work: 900, yield: [['scrap', 25], ['components', 2]] } },
 
   // Player buildings. `work` is ticks at work speed 1.0.
   wall: { kind: 'building', label: 'Wood wall', wallLike: true, blocks: true, hp: 300, cost: { wood: 5 }, work: 135 },
@@ -65,6 +67,30 @@ export const THINGS = {
   burnPit: { kind: 'building', label: 'Burn pit', bench: true, light: 4, recipes: ['burnCorpses'], hp: 120, cost: { wood: 25 }, work: 300 },
   torch: { kind: 'building', label: 'Torch', light: 5, hp: 40, cost: { wood: 4 }, work: 80 },
 
+  // ---- Phase 3 "The Hum" ----
+  // Fences: see-through, stop zombies; a lone attacker barely dents one (FENCE.loneFactor).
+  fence: { kind: 'building', label: 'Chain-link fence', wallLike: true, fence: true, seeThrough: true, blocks: true, hp: 200, cost: { scrap: 2 }, work: 90 },
+  electricFence: { kind: 'building', label: 'Electric fence', wallLike: true, fence: true, seeThrough: true, blocks: true, hp: 240, cost: { scrap: 3, components: 1 }, work: 160,
+    power: { draw: 15 }, electric: { damage: [8, 14], stagger: 150 } },
+  gate: { kind: 'building', label: 'Gate', door: true, gate: true, hp: 200, cost: { scrap: 6 }, work: 200 },
+  // Machines. power.output / power.draw in W, power.storage in Wd; noise = Din pulse radius.
+  powerPole: { kind: 'building', label: 'Power pole', pole: true, hp: 60, cost: { wood: 6, scrap: 2 }, work: 120 },
+  generator: { kind: 'building', label: 'Fuel generator', machine: true, size: [2, 2], blocks: true, hp: 300, cost: { scrap: 40, components: 4 }, work: 1500,
+    power: { output: 1000 }, fuel: { capacity: 60, perDay: 30, items: ['biofuel', 'wood'] }, noise: 18 },
+  solarPanel: { kind: 'building', label: 'Solar panel', machine: true, size: [2, 2], blocks: true, hp: 150, cost: { scrap: 25, components: 6 }, work: 1200,
+    power: { output: 400, solar: true } },
+  battery: { kind: 'building', label: 'Battery', machine: true, size: [1, 2], rotatable: true, blocks: true, hp: 150, cost: { scrap: 20, components: 3 }, work: 800,
+    power: { storage: 1500 } },
+  floodlight: { kind: 'building', label: 'Floodlight', machine: true, nightOnly: true, light: 11, lure: 14, hp: 80, cost: { scrap: 10, components: 2 }, work: 400,
+    power: { draw: 100 } },
+  siren: { kind: 'building', label: 'Siren', machine: true, hp: 120, cost: { scrap: 15, components: 3 }, work: 500, power: { draw: 150 }, noise: 40 },
+  autoTurret: { kind: 'building', label: 'Auto-turret', machine: true, blocks: true, hp: 220, cost: { scrap: 30, components: 5 }, work: 1400, power: { draw: 150 },
+    ammoFeed: { capacity: 60 }, turret: { range: 13, damage: [18, 26], cooldown: 70, accuracy: 0.7, noise: 22 } },
+  ammoPress: { kind: 'building', label: 'Ammo press', machine: true, bench: true, size: [2, 2], blocks: true, hp: 200, cost: { scrap: 35, components: 4 }, work: 1300,
+    recipes: ['pressAmmo'], power: { draw: 300 }, noise: 9 },
+  renderVat: { kind: 'building', label: 'Render vat', machine: true, bench: true, size: [2, 1], rotatable: true, blocks: true, hp: 180, cost: { scrap: 25, components: 2 }, work: 1000,
+    recipes: ['renderCorpse'], power: { draw: 150 }, noise: 7 },
+
   blueprint: { kind: 'blueprint', label: 'Blueprint' },
 };
 
@@ -78,6 +104,9 @@ export const RECIPES = {
   pistol: { label: 'Build pistol', workType: 'crafting', skill: 'crafting', ingredients: [{ def: 'scrap', count: 35 }, { def: 'wood', count: 5 }], product: { def: 'pistol', count: 1 }, work: 2000 },
   rifle: { label: 'Build hunting rifle', workType: 'crafting', skill: 'crafting', ingredients: [{ def: 'scrap', count: 55 }, { def: 'wood', count: 15 }], product: { def: 'rifle', count: 1 }, work: 3000 },
   burnCorpses: { label: 'Burn corpses', workType: 'hauling', skill: null, ingredients: [{ def: 'corpse', count: 1 }], product: null, work: 180, defaultBill: { mode: 'forever', target: 1 } },
+  // Machine recipes run on their own while powered; haulers only keep them stocked.
+  pressAmmo: { label: 'Press ammo', workType: 'machine', skill: null, ingredients: [{ def: 'scrap', count: 5 }], product: { def: 'ammo', count: 15 }, work: 600, defaultBill: { mode: 'until', target: 120 } },
+  renderCorpse: { label: 'Render corpses into biofuel', workType: 'machine', skill: null, ingredients: [{ def: 'corpse', count: 1 }], product: { def: 'biofuel', count: 8 }, work: 900, defaultBill: { mode: 'forever', target: 1 } },
 };
 export const ingKey = (ing) => ing.def ?? ing.tag;
 export const ingMatches = (ing, t) => (ing.def ? t.def === ing.def : !!THINGS[t.def].tags?.includes(ing.tag));

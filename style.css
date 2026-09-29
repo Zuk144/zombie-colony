@@ -247,3 +247,20 @@ button.prio.p4 { background: #36434f; }
 .cold { color: #9fd0ff; }
 .hotText { color: #ffb08a; }
 @media (max-width: 480px) { #temp .dim { display: none; } }
+
+/* ---- Phase 3 bits ---- */
+#yardChip { gap: 6px; color: #9be3a8; }
+#yardChip .icon { width: 18px; height: 18px; }
+#yardChip.danger { color: #fff; background: rgba(190, 50, 38, 0.88); border-color: rgba(255, 140, 120, 0.5); animation: pulse 1.2s ease-in-out infinite; }
+.din { display: inline-flex; align-items: center; gap: 4px; margin: 0 6px; font-size: 13px; }
+.din .icon { width: 16px; height: 16px; }
+.din-quiet { color: var(--muted); }
+.din-humming { color: #d8d3a0; }
+.din-loud { color: #ffb45c; }
+.din-deafening { color: #ff6a55; }
+#overlayChip { position: fixed; left: 50%; transform: translateX(-50%); top: calc(var(--hud-h, 52px) + 16px + var(--sat)); z-index: 4;
+  padding: 7px 14px; border-radius: 16px; background: var(--glass-strong); border: 1px solid var(--edge); font-size: 13px; color: var(--accent); pointer-events: none;
+  animation: overlayName 3.5s ease forwards; } /* names the layer, then gets out of the way */
+@keyframes overlayName { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+.hint .icon { width: 14px; height: 14px; display: inline-block; vertical-align: -2px; }
+@media (max-width: 820px) { #yardChip span { display: none; } .din { margin: 0 2px; } }

@@ -302,9 +302,12 @@ const WALL_COLORS = {
   scrapWall: ['#7f8c98', '#434c55'],
   ruinWall: ['#bdb8ac', '#6f6a60'],
   barricade: ['#9c7a4c', '#4a3520'],
+  fence: ['#8f99a3', '#3e454c'],
+  electricFence: ['#a7a07a', '#4a452c'],
 };
 const WALL_W = 0.66 * T;
-const wallWidth = (k) => (k === 'barricade' ? 0.4 * T : WALL_W);
+const isFence = (k) => k === 'fence' || k === 'electricFence';
+const wallWidth = (k) => (k === 'barricade' ? 0.4 * T : isFence(k) ? 0.1 * T : WALL_W);
 
 // Walls are drawn as thick strokes between neighbor centers so they read as one connected
 // structure (Prison Architect style). Three passes so different wall types join cleanly.
@@ -324,10 +327,17 @@ export function drawWalls(ctx, walls, connects, px, lod) {
     if (!linked) { path.moveTo(cx - 0.01, cy); path.lineTo(cx + 0.01, cy); }
   }
   ctx.lineCap = 'square';
+  // Fences are see-through: a faint mesh band under the wire instead of a solid shadow.
+  for (const k in groups) {
+    if (!isFence(k)) continue;
+    ctx.strokeStyle = 'rgba(190, 200, 210, 0.22)';
+    ctx.lineWidth = 0.34 * T;
+    ctx.stroke(groups[k]);
+  }
   ctx.save();
   ctx.translate(2, 3);
   ctx.strokeStyle = SHADOW;
-  for (const k in groups) { ctx.lineWidth = wallWidth(k); ctx.stroke(groups[k]); }
+  for (const k in groups) { if (isFence(k)) continue; ctx.lineWidth = wallWidth(k); ctx.stroke(groups[k]); }
   ctx.restore();
   for (const k in groups) { ctx.strokeStyle = WALL_COLORS[k][1]; ctx.lineWidth = wallWidth(k) + 2.2 * px; ctx.stroke(groups[k]); }
   for (const k in groups) { ctx.strokeStyle = WALL_COLORS[k][0]; ctx.lineWidth = wallWidth(k); ctx.stroke(groups[k]); }
@@ -335,7 +345,7 @@ export function drawWalls(ctx, walls, connects, px, lod) {
     ctx.save();
     ctx.translate(-0.8, -1);
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.13)';
-    for (const k in groups) { if (k === 'barricade') continue; ctx.lineWidth = WALL_W * 0.34; ctx.stroke(groups[k]); }
+    for (const k in groups) { if (k === 'barricade' || isFence(k)) continue; ctx.lineWidth = WALL_W * 0.34; ctx.stroke(groups[k]); }
     ctx.restore();
     if (groups.barricade) { // plank seams read as "low fence", not "wall"
       ctx.strokeStyle = 'rgba(40, 26, 12, 0.55)';
@@ -345,6 +355,14 @@ export function drawWalls(ctx, walls, connects, px, lod) {
       ctx.setLineDash([]);
     }
   }
+  // Fence posts (and yellow insulators on electric fences).
+  for (const t of walls) {
+    if (!isFence(t.def)) continue;
+    const cx = (t.x + 0.5) * T, cy = (t.y + 0.5) * T;
+    ctx.fillStyle = '#3e454c';
+    circle(ctx, cx, cy, 1.5);
+    if (t.def === 'electricFence') { ctx.fillStyle = '#f2d24a'; circle(ctx, cx, cy, 0.8); }
+  }
   ctx.lineCap = 'butt';
 }
 
@@ -353,6 +371,18 @@ export function drawDoor(ctx, t, horizontal, open, px) {
   ctx.save();
   ctx.translate(cx, cy);
   if (!horizontal) ctx.rotate(Math.PI / 2);
+  if (t.def === 'gate') { // steel frame with bars; swings aside when open
+    ctx.strokeStyle = '#3e454c'; ctx.lineWidth = 1.4;
+    ctx.fillStyle = '#3e454c';
+    ctx.fillRect(-T / 2, -1.8, 1.8, 3.6); ctx.fillRect(T / 2 - 1.8, -1.8, 1.8, 3.6);
+    ctx.strokeStyle = '#a7b0b8'; ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    if (open) { ctx.moveTo(-T / 2 + 1.8, 0); ctx.lineTo(-T / 2 + 1.8 + (T - 4) * 0.35, -(T - 4) * 0.9); }
+    else { ctx.moveTo(-T / 2 + 1.8, 0); ctx.lineTo(T / 2 - 1.8, 0); for (let k = 1; k < 4; k++) { const x = -T / 2 + 1.8 + k * (T - 3.6) / 4; ctx.moveTo(x, -1.6); ctx.lineTo(x, 1.6); } }
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
   ctx.fillStyle = SHADOW;
   ctx.fillRect(-T / 2 + 2, -2, T, 5.5);
   ctx.fillStyle = '#5b3d24';
@@ -515,6 +545,100 @@ export function drawGuardPost(ctx, t, px, lod) {
   ctx.strokeRect(x - 0.5, y - 0.5, T + 1, T + 1);
   ctx.fillStyle = '#4a3520';
   for (const [dx, dy] of [[0, 0], [T, 0], [0, T], [T, T]]) circle(ctx, x + dx - (dx ? 0.5 : -0.5), y + dy - (dy ? 0.5 : -0.5), 1.4);
+}
+
+// ---- Machines (Phase 3) ----------------------------------------------------------------
+// state: { on (powered & wanted), running, broken, powered }
+export function drawMachine(ctx, t, now, px, lod, sw, sh, state) {
+  const x = t.x * T, y = t.y * T, W = sw * T, H = sh * T, cx = x + W / 2, cy = y + H / 2;
+  const box = (fill, edge = '#1d2024', r = 2) => { rrect(ctx, x + 1.5, y + 1.5, W - 3, H - 3, r); ctx.fillStyle = fill; ctx.fill(); outline(ctx, px, edge, 1.2); };
+  const shadow = () => { ctx.fillStyle = SHADOW; rrect(ctx, x + 3, y + 4, W - 3, H - 3, 2); ctx.fill(); };
+  const shake = state.running ? Math.sin(now / 35 + t.id) * 0.35 : 0;
+  switch (t.def) {
+    case 'powerPole': {
+      ctx.fillStyle = SHADOW; circle(ctx, cx + 1.5, cy + 2, 2.4);
+      ctx.fillStyle = '#6b4a2e'; circle(ctx, cx, cy, 2);
+      ctx.strokeStyle = '#4a3520'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(cx - 4.5, cy); ctx.lineTo(cx + 4.5, cy); ctx.stroke();
+      ctx.fillStyle = state.powered ? '#f2d24a' : '#6d6f73'; circle(ctx, cx - 4.5, cy, 0.9); circle(ctx, cx + 4.5, cy, 0.9);
+      break;
+    }
+    case 'generator': {
+      shadow();
+      ctx.save(); ctx.translate(shake, 0);
+      box('#8a5a2e', '#2f2014');
+      ctx.fillStyle = '#3a3d42'; rrect(ctx, x + 5, y + 5, W - 14, H - 10, 2); ctx.fill();
+      ctx.fillStyle = '#2a2c30'; circle(ctx, x + W - 6, y + 6, 2.6); // exhaust
+      ctx.restore();
+      if (state.running) for (let i = 0; i < 3; i++) { const k = (now / 900 + i / 3) % 1; ctx.fillStyle = `rgba(90,90,90,${0.35 * (1 - k)})`; circle(ctx, x + W - 6 + k * 4, y + 6 - k * 12, 1.5 + k * 3); }
+      break;
+    }
+    case 'solarPanel': {
+      shadow(); box('#1f3552', '#0f1a29', 1);
+      ctx.strokeStyle = 'rgba(160, 200, 240, 0.35)'; ctx.lineWidth = 0.7; ctx.beginPath();
+      for (let k = 1; k < 4; k++) { ctx.moveTo(x + 1.5 + (W - 3) * k / 4, y + 2); ctx.lineTo(x + 1.5 + (W - 3) * k / 4, y + H - 2); ctx.moveTo(x + 2, y + 1.5 + (H - 3) * k / 4); ctx.lineTo(x + W - 2, y + 1.5 + (H - 3) * k / 4); }
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.moveTo(x + 3, y + 3); ctx.lineTo(x + W * 0.45, y + 3); ctx.lineTo(x + 3, y + H * 0.45); ctx.fill();
+      break;
+    }
+    case 'battery': {
+      shadow(); box('#2f3a33', '#141a16');
+      const f = Math.max(0, Math.min(1, (t.charge ?? 0) / 1500));
+      const vertical = H > W;
+      ctx.fillStyle = '#1a1f1b'; vertical ? ctx.fillRect(cx - 2.5, y + 4, 5, H - 8) : ctx.fillRect(x + 4, cy - 2.5, W - 8, 5);
+      ctx.fillStyle = f > 0.2 ? '#7ed957' : '#e0a23a';
+      vertical ? ctx.fillRect(cx - 2.5, y + 4 + (H - 8) * (1 - f), 5, (H - 8) * f) : ctx.fillRect(x + 4, cy - 2.5, (W - 8) * f, 5);
+      break;
+    }
+    case 'floodlight': {
+      ctx.fillStyle = SHADOW; circle(ctx, cx + 1.5, cy + 2, 3);
+      ctx.fillStyle = '#3a3d42'; circle(ctx, cx, cy, 2.6);
+      ctx.fillStyle = state.on ? '#fff3c4' : '#6d6f73'; rrect(ctx, cx - 3.5, cy - 5.5, 7, 3.5, 1); ctx.fill();
+      break;
+    }
+    case 'siren': {
+      ctx.fillStyle = SHADOW; circle(ctx, cx + 1.5, cy + 2, 3.5);
+      ctx.fillStyle = '#b8453a'; circle(ctx, cx, cy, 3.4);
+      ctx.fillStyle = '#e8e2d4'; circle(ctx, cx, cy, 1.4);
+      if (state.running) for (let i = 0; i < 2; i++) { const k = (now / 700 + i / 2) % 1; ctx.strokeStyle = `rgba(255, 110, 90, ${0.7 * (1 - k)})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, 4 + k * 14, 0, TAU); ctx.stroke(); }
+      break;
+    }
+    case 'autoTurret': {
+      ctx.fillStyle = SHADOW; circle(ctx, cx + 1.8, cy + 2.4, 6);
+      ctx.fillStyle = '#4b5057'; circle(ctx, cx, cy, 5.6);
+      ctx.beginPath(); ctx.arc(cx, cy, 5.6, 0, TAU); outline(ctx, px, '#1d2024', 1.2);
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(t.aim ?? -Math.PI / 2);
+      ctx.fillStyle = '#2a2d31'; rrect(ctx, -2.6, -2.6, 5.2, 5.2, 1); ctx.fill();
+      ctx.strokeStyle = '#1d2024'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(2, -1); ctx.lineTo(8.5, -1); ctx.moveTo(2, 1); ctx.lineTo(8.5, 1); ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = state.on ? '#7ed957' : '#e05a4a'; circle(ctx, cx - 3.2, cy + 3.2, 0.9);
+      break;
+    }
+    case 'ammoPress': {
+      shadow();
+      ctx.save(); ctx.translate(0, state.running ? Math.abs(Math.sin(now / 160)) * -0.8 : 0);
+      box('#6e7479', '#26292c');
+      ctx.fillStyle = '#3a3d42'; rrect(ctx, cx - 5, cy - 5, 10, 10, 1.5); ctx.fill();
+      ctx.fillStyle = '#d6ad45'; for (let k = 0; k < 3; k++) circle(ctx, x + 5 + k * 3, y + H - 5, 1.1);
+      ctx.restore();
+      break;
+    }
+    case 'renderVat': {
+      shadow(); box('#50614a', '#1e261c', 4);
+      const vertical = H > W;
+      ctx.fillStyle = state.running ? `rgba(150, 190, 60, ${0.75 + Math.sin(now / 300) * 0.1})` : 'rgba(110, 130, 70, 0.7)';
+      vertical ? ellipse(ctx, cx, cy, 4, H / 2 - 5) : ellipse(ctx, cx, cy, W / 2 - 5, 4);
+      if (state.running) { ctx.fillStyle = 'rgba(210, 240, 140, 0.6)'; circle(ctx, cx + Math.sin(now / 200) * 3, cy, 0.9); }
+      break;
+    }
+  }
+  if (state.broken) { // wrecked: dark wash and a red cross
+    ctx.fillStyle = 'rgba(20, 10, 10, 0.45)'; rrect(ctx, x + 1, y + 1, W - 2, H - 2, 2); ctx.fill();
+    ctx.strokeStyle = '#e05a4a'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(cx - 3, cy - 3); ctx.lineTo(cx + 3, cy + 3); ctx.moveTo(cx + 3, cy - 3); ctx.lineTo(cx - 3, cy + 3); ctx.stroke();
+  } else if (state.unpowered && lod > 0) { // wants power but has none: small crossed-bolt badge
+    const bx = x + W - 3.5, by = y + 3.5;
+    ctx.fillStyle = 'rgba(20, 22, 26, 0.85)'; circle(ctx, bx, by, 2.8);
+    ctx.fillStyle = '#e0a23a'; ctx.beginPath(); ctx.moveTo(bx + 0.4, by - 2); ctx.lineTo(bx - 1.2, by + 0.3); ctx.lineTo(bx, by + 0.3); ctx.lineTo(bx - 0.4, by + 2); ctx.lineTo(bx + 1.2, by - 0.3); ctx.lineTo(bx, by - 0.3); ctx.closePath(); ctx.fill();
+  }
 }
 
 export function drawBlueprint(ctx, t, px, fraction, sw = 1, sh = 1) {

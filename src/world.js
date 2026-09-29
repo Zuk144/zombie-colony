@@ -33,6 +33,13 @@ export function createWorld(seed) {
     support: new Uint8Array(n), // derived: 1 where a roof would be held up (within 6 of a wall)
     outdoor: 12, // °C, updated every rare tick by climate.js
     weather: null, // { kind, offset, until } — cold snaps and heat waves
+    secure: new Uint8Array(n), // derived (perimeter.js): 1 = zombies can't get here without breaking something
+    secureDirty: true,
+    secureCount: 0,
+    networks: [], // derived (power.js): power grids
+    powerNet: new Map(), // derived: thing id → index into networks
+    powerDirty: true,
+    din: 0, // colony noise level this rare tick (buildings.js)
     terrainDirty: [], // cells whose terrain art must be redrawn (rock mined, etc.)
     roads: [],
     nextId: 1,
@@ -118,6 +125,8 @@ function cellChanged(w, t) {
   const d = THINGS[t.def];
   if (d.blocks) w.reachDirty = true;
   if ((d.blocks && !d.seeThrough) || d.door) w.roomsDirty = true;
+  if (d.blocks || d.door) w.secureDirty = true;
+  if (d.power || d.pole) w.powerDirty = true;
   if (d.natural) forFootprint(t, (x, y) => w.terrainDirty.push(x, y));
 }
 
@@ -203,7 +212,7 @@ export function zombieCost(w, x, y) {
   for (const t of w.cells[y * w.w + x]) {
     const d = THINGS[t.def];
     if (!d.blocks && !d.door) continue;
-    if (!d.hp) return Infinity;
+    if (!d.hp || t.broken) return Infinity; // a wrecked machine is just a lump in the way
     cost += 2 + t.hp * ZOMBIE.bashCostPerHp;
   }
   return cost;
@@ -211,7 +220,7 @@ export function zombieCost(w, x, y) {
 
 // The building a zombie would have to bash to enter (x, y), if any.
 export function bashTargetAt(w, x, y) {
-  return thingsAt(w, x, y).find((t) => { const d = THINGS[t.def]; return (d.blocks || d.door) && d.hp; }) ?? null;
+  return thingsAt(w, x, y).find((t) => { const d = THINGS[t.def]; return (d.blocks || d.door) && d.hp && !t.broken; }) ?? null;
 }
 
 export function blocksSight(w, x, y) {

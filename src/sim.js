@@ -11,6 +11,9 @@ import { tickZombie, updateZombieField, scanThreat, tickCorpses } from './combat
 import { tickHealth } from './medical.js';
 import { tickClimate, tickExposure, tickRot, tickFrost, outdoorTemp, plantGrowthFactor } from './climate.js';
 import { tickBuildings } from './buildings.js';
+import { tickPower } from './power.js';
+import { tickPerimeter } from './perimeter.js';
+import { tickTurrets } from './combat.js';
 import { createDirector, tickDirector } from './director.js';
 import { generateMap } from './mapgen.js';
 
@@ -40,6 +43,7 @@ export function tickWorld(w) {
     updateZombieField(w);
     w.fieldDirty = false;
   }
+  if (w.tick % THREAT_SCAN === 0) tickTurrets(w);
   for (const p of w.pawns.slice()) {
     if (p.gone) continue;
     if (p.faction === 'zombie') tickZombie(w, p);
@@ -47,7 +51,9 @@ export function tickWorld(w) {
   }
   if (w.tick % RARE_TICK === 0) {
     tickClimate(w, RARE_TICK);
+    tickPower(w, RARE_TICK);
     tickBuildings(w, RARE_TICK);
+    tickPerimeter(w);
     growPlants(w, RARE_TICK);
     tickFrost(w, RARE_TICK);
     tickRot(w, RARE_TICK);

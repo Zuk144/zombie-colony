@@ -1,7 +1,7 @@
 // The Director: decides when things happen and how big the hordes are.
 // Left 4 Dead's AI Director rhythm on top of RimWorld's Cassandra numbers (docs/DESIGN.md §10).
 
-import { TICKS_PER_DAY, STORY_INTERVAL, MAX_ZOMBIES } from './config.js';
+import { TICKS_PER_DAY, STORY_INTERVAL, MAX_ZOMBIES, DIN } from './config.js';
 import { THINGS } from './defs.js';
 import { mtbChance, curve } from './rng.js';
 import { allThings, colonists, spawnItem, despawn, letter, idx, inBounds, zombieCost, bashTargetAt, isNight, reachGroup } from './world.js';
@@ -41,7 +41,8 @@ export function createDirector() {
 export function threatPoints(w) {
   const day = w.tick / TICKS_PER_DAY;
   const pts = (curve(WEALTH_POINTS, w.wealth) + colonists(w).length * curve(POINTS_PER_SURVIVOR, w.wealth))
-    * DIFFICULTY.threatScale * curve(START_FACTOR, day) * w.story.adaptation * (isNight(w.tick) ? 1.3 : 1);
+    * DIFFICULTY.threatScale * curve(START_FACTOR, day) * w.story.adaptation * (isNight(w.tick) ? 1.3 : 1)
+    * (1 + Math.min(DIN.hordeMax, (w.din ?? 0) * DIN.hordePer)); // a loud colony draws bigger hordes
   return Math.max(36, Math.min(10000, Math.round(pts)));
 }
 
@@ -88,7 +89,8 @@ export function tickDirector(w) {
   }
 
   const winter = seasonOf(w.tick) === 'Winter';
-  const strayMtb = (D.strayMtbDays / (isNight(w.tick) ? D.nightStrayMult : 1)) * (winter ? 2 : 1); // the cold keeps them sluggish
+  const strayMtb = (D.strayMtbDays / (isNight(w.tick) ? D.nightStrayMult : 1)) * (winter ? 2 : 1) // the cold keeps them sluggish
+    / (1 + (w.din ?? 0) * DIN.strayPer); // noise carries: more strays find a loud colony
   if (rng.chance(mtbChance(strayMtb * TICKS_PER_DAY, STORY_INTERVAL))) strays(w, rng.int(1, 2));
 
   if (rng.chance(mtbChance(D.miscMtbDays * TICKS_PER_DAY, STORY_INTERVAL))) {

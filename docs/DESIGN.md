@@ -121,80 +121,83 @@ Survivor-specific additions:
 - Future: expeditions to off-map locations (like Walking Dead supply runs or RimWorld
   caravans) for rare loot, survivors, and stories.
 
-## 9. Automation (the Factorio layer): planned, a handful of machines
+## 9. Phase 3: "The Hum" (machines, fences, and noise)
 
-**Owner decision: keep it small, a handful of machines rather than production chains.**
-The goal is to *free survivors*, not replace them. Every machine creates new people-work
-(refuel, repair) and new risk (noise draws zombies, fuel runs out).
+**Owner direction:** a handful of machines, fences that keep zombies out so machines are safe,
+and **make it ours**, not RimWorld power plus a zombie mod.
 
-Candidate set (about 6–8 pieces total):
+The question that decides it: what does a machine mean in a zombie world? In RimWorld it's
+convenience. Here **every machine is a trade between labor and noise**, and noise is what the
+dead follow. Automation is a way of managing the horde, not just producing more stuff.
 
-| Piece | What it does | Tension |
-|---|---|---|
-| Generator | Burns wood or fuel for power | **Loud**, needs refueling |
-| Solar panel | Quiet power, daytime only | Expensive (scrap) |
-| Conveyor belt | Moves items. Draw it with a finger | Layout space inside walls |
-| Loader arm | Moves items between belts, stockpiles, and machines | Needs power |
-| Ammo press | Scrap in, ammo out, with no survivor needed | Needs power, makes noise |
-| Electric stove | Raw food in, meals out | Needs power |
-| Auto-turret | Shoots zombies, fed by an ammo belt | Needs ammo supply and power. Loud |
-| Floodlight | Lights the killing zone at night | Light attracts attention |
+### The five ideas
 
-Touch design: **drag to draw a belt path** (direction follows your finger), tap a machine to
-set what it makes.
+1. **The Din (noise is the price of power).** Every running machine emits noise pulses, and the
+   colony's total shows as a meter: Quiet → Humming → Loud → Deafening. A louder colony draws
+   more strays and bigger hordes. Zombies drawn by a noise go for **the machine making it**.
+   Machines have a mode (On / Day only / Off), so running a generator only by day and staying
+   quiet at night is a real choice.
+2. **Yards, not rooms.** Chain-link **fences** are cheap, see-through, and fast to drag out,
+   with **gates** for people. The rule is easy to read: **a lone straggler just rattles a
+   fence; it takes a crowd (3+) pushing together to tear it down.** The game computes your
+   **secure yard** (cells zombies can't reach without breaking something), shows it in the
+   overlay and HUD, and alerts on a **breach** the moment one gets inside. **Electric fences**
+   shock and stagger whatever touches them.
+3. **Herd the dead.** A **siren** is a powered lure that pulls zombies from far away. Put it
+   outside the fence, ring it with spike traps and an auto-turret, and noise becomes a weapon:
+   a kill zone.
+4. **The dead fuel the living.** A **render vat** turns zombie corpses into **biofuel** for
+   generators. Kill → render → power → turrets → kill: the colony's machine loop runs on the
+   horde.
+5. **Components send you outside.** Machines need **components** salvaged from wrecked cars and
+   ruins beyond the fence. Automation is the reason to take risks.
 
-### Phase 3 spec (ready to build)
+Plus two rules that keep it touch-friendly and human:
+- **No conveyor belts.** Machines run themselves as long as haulers keep them stocked (ammo
+  press, render vat) or fueled (generator) or loaded (turret). People become supply crews, not
+  machine operators.
+- **Machines break.** Zombies wreck noisy machines and brownouts stop them. A broken machine
+  stops until a builder repairs it. Machines inside the fence are the safe ones.
 
-**Power, designed for touch.** No wire drawing. **Power poles** join anything within a 6-cell
-radius (Factorio-style), and poles within 8 cells of each other link up on their own. Networks
-are recomputed only when something is built or destroyed, the same way rooms are.
-- Generators and solar panels supply watts. Machines draw watts only while working.
-- Batteries soak up any surplus and cover shortfalls.
-- If demand exceeds supply and the batteries are empty, it's a **brownout**: machines stop, and
-  a letter says which network and why.
-- A power overlay (the layers button cycles Rooms → Power → Off) colors each network and shows
-  its supply against its demand.
+### The pieces
 
-**The pieces** (the core eight, then four optional extras that tie into systems that already exist):
+| Piece | Power | What it does | Tension |
+|---|---|---|---|
+| Chain-link fence / gate | — | Cheap scrap barrier; stragglers can't break it alone | Hordes push it over; see-through, so no shelter |
+| Electric fence | 15 W each | Shocks and staggers attackers | Needs power, so it fails in a brownout |
+| Power pole | — | Connects everything within 6 cells; poles within 8 link up | Layout |
+| Fuel generator (2×2) | +1000 W | Burns wood or biofuel, only when there's demand | **Loud**; the Din's main source |
+| Solar panel (2×2) | +400 W by day | Silent. Dead at night and under a roof | Needs components; needs batteries for nights |
+| Battery (1×2) | stores 1500 Wd | Covers nights and brownouts | Components |
+| Floodlight | 100 W | Lights 11 cells at night; guards see zombies in the light | The light draws them |
+| Siren | 150 W | Lure: pulls idle zombies within 40 cells | That's the point: use it away from home |
+| Auto-turret | 150 W | Shoots zombies within 13 cells; loaded with ammo by haulers | Loud; eats ammo |
+| Ammo press (2×2) | 300 W | Scrap → ammo, nobody working it | Hum; haulers feed scrap |
+| Render vat (2×1) | 150 W | Zombie corpses → biofuel | Hum; also disposes of bodies (they can't rise) |
 
-| Piece | Size | Power | Behavior | Hooks it uses |
-|---|---|---|---|---|
-| Fuel generator | 2×2 | +1000 W | Burns wood; **noise radius 18** while running | fuel system, building tick, `makeNoise` |
-| Solar panel | 2×2 | +400 W by day | Silent. Doesn't work under a roof | roofs, time of day |
-| Battery | 1×2, rotatable | stores 1000 Wd | Charges from surplus, drains on shortfall | building tick |
-| Power pole | 1×1 | — | Connects everything within 6 cells | union-find like rooms |
-| Conveyor belt | 1×1, directional | — | Moves an item one cell every ~30 ticks | new item-on-belt layer |
-| Loader arm | 1×1, directional | 150 W | Takes from the cell behind (stockpile, belt, machine output), puts to the cell in front | bench `stock` as input buffer |
-| Ammo press | 2×2 | 300 W | 5 scrap → 15 ammo with nobody working it; small noise | recipes, bills |
-| Auto-turret | 1×1 | 200 W | Shoots zombies within 14 cells, fed with ammo (by arm or by hand); **loud** | combat `shoot`, noise |
-| *Electric stove* | 2×1 | 350 W | Cooks meals, no fuel, and it's a kitchen | recipes, rooms |
-| *Freezer (cooler)* | 1×1 | 250 W | Pulls its room toward −5°C, so food keeps | room temperature, spoilage |
-| *Grow lamp* | 1×1 | 200 W | Plants within 3 cells grow under a roof | roofs block sunlight (2b) |
-| *Floodlight* | 1×1 | 100 W | Light radius 12 at night; zombies are drawn to it | lighting, noise |
+### How it plays (a session sketch)
+Day 12, the scrap fence is up around the fields, and a straggler rattles it at 3am. The tower
+guard shoots it, and the render vat turns the body into fuel by morning. Day 20, the generator
+runs the ammo press through the day, and the Din reads "Loud". A horde arrives from the north,
+drawn by it. They mob the generator yard, three at a time push over the fence, and the electric
+section holds long enough for the turret. Day 30, you build a siren two hundred meters out, ring
+it with traps, and switch it on at dusk.
 
-**What Phase 2b already put in place:**
-- **Fuel:** `buildings.js` burning plus refuel jobs. Generators reuse it as is.
-- **A per-building tick hook** (`tickBuildings`) where power, production, and noise will go.
-- **Multi-cell, rotatable placement** (the ↻ button, footprint preview, `sw`/`sh` on blueprints
-  and buildings). Machines are 2×2 and arms are directional.
-- **Room temperature and heat sources** for the freezer and electric stove, and **roofs that
-  block sunlight** for the grow lamp and solar panels.
-- **Spoilage**, which is what makes the freezer worth having.
-
-**Engine work still to do in Phase 3:**
-1. Direction as data (`t.dir` 0–3) and a drag gesture that sets it for belts.
-2. A belt item layer: items riding belts, separate from ground stacks, drawn sliding.
-3. Machine input and output buffers, generalizing bench `stock`.
-4. Power networks: union-find and a supply/demand solve every rare tick.
-5. The power overlay, and machine inspectors (power status, buffers, recipe).
-6. **Performance:** `findWork` costs about 5 ms per call because every WorkGiver scans all
-   things. Before machines add more, add per-kind indexes (items, blueprints, designated things)
-   updated in `spawn`/`despawn`.
-
-**Milestones:** 3a power (poles, generator, solar, battery, overlay, brownouts, generator
-noise), then 3b production (ammo press, then the optional electric stove, freezer, and grow
-lamp), then 3c logistics (belts drawn by finger, loader arms), then 3d defense (auto-turret fed
-by belts, floodlight).
+### Engine notes
+- **Power** (`power.js`): union-find over poles, rebuilt when anything powered is built or
+  destroyed. Every rare tick each network balances supply and demand through its batteries,
+  and a shortfall is a brownout with a letter.
+- **Secure yard** (`perimeter.js`): a flood fill from the map edge over cells zombies can enter
+  without bashing. Unreached pockets people can stand on are secure **if something the colony
+  built bounds them** (a sealed room in a ruin doesn't count). It's rebuilt when any blocking
+  building changes.
+- **Din**: running machines pulse `makeNoise` every rare tick. `w.din` feeds the Director's
+  threat points and stray rate. Zombies investigating a noise remember its source and **wreck**
+  it (state `wreck`).
+- Machines reuse bench bills (`workType: 'machine'`, haulers stock them) and the fuel/supply
+  system (generator fuel, turret ammo).
+- Later, if wanted: electric stove, freezer, grow lamp (the hooks already exist: rooms,
+  spoilage, and roofs blocking sunlight), and `findWork` per-kind indexes for performance.
 
 ## 10. The Director (storyteller)
 
@@ -271,8 +274,13 @@ crops need warmth and open sky, frost kills them, and sowing follows the season;
 unless kept cold; zombies slow down in the cold; fuel and refueling; multi-cell rotatable
 placement (the 2×1 table). The rooms/roofs/temperature overlay.
 
-**Phase 3: automation (next)**
-A handful of machines. The full spec, what's already prepared, and the milestones are in §9.
+**Phase 3: "The Hum" (done, first pass)**
+Fences, gates and electric fences with the crowd rule; secure yard and breach alerts; power
+poles, grids, generator, solar, batteries, brownouts; the Din and machine-wrecking zombies;
+floodlight, siren, auto-turret, ammo press, render vat; components from cars and loot; machine
+modes (Always / Day only / Off); Machines dock tray, machine inspector, yard and Din HUD chips,
+and a layers button that cycles Rooms → Yard → Power. See §9. Still open: balance passes on the
+Din and horde scaling with real play, and the "later" machines in §9.
 
 **Phase 4: people and the world**
 Relationships, human factions, choice events, expeditions, and more zombie types.

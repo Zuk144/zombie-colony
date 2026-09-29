@@ -101,7 +101,7 @@ function placeRoads(w, cx, cy) {
 
 // [def, min, max, weight]
 const LOOT = [['cannedFood', 4, 10, 3], ['scrap', 8, 20, 3], ['wood', 10, 25, 2], ['berries', 10, 20, 1],
-  ['medkit', 1, 3, 1], ['herbs', 2, 5, 1], ['ammo', 10, 25, 1], ['machete', 1, 1, 0.4], ['rifle', 1, 1, 0.15]];
+  ['medkit', 1, 3, 1], ['herbs', 2, 5, 1], ['ammo', 10, 25, 1], ['machete', 1, 1, 0.4], ['rifle', 1, 1, 0.15], ['components', 1, 3, 1.2]];
 
 function placeRuins(w, roads, occupied, cx, cy) {
   const { rng } = w;

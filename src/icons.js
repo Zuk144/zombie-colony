@@ -54,6 +54,21 @@ const P = {
   layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
   thermo: '<path d="M10 14V5a2 2 0 0 1 4 0v9a4 4 0 1 1-4 0z"/><path d="M12 11v5"/>',
   rotate: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>',
+  machine: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+  fence: '<path d="M4 4v16M12 4v16M20 4v16M4 8l8 8M12 8l8 8M4 16l8-8M12 16l8-8"/>',
+  electricFence: '<path d="M4 4v16M20 4v16M4 10h16M4 16h16"/><path d="M13 5l-3 5h4l-3 5" fill="none"/>',
+  gate: '<path d="M4 4v16M20 4v16M4 8h16M4 16h16M9 8v8M15 8v8"/>',
+  powerPole: '<path d="M12 3v18M6 7h12M8 7l-2 3M16 7l2 3"/>',
+  generator: '<rect x="3" y="7" width="15" height="12" rx="1.5"/><path d="M18 11h3v4h-3M7 11h7v4H7z"/><path d="M8 4h2v3"/>',
+  solarPanel: '<path d="M4 16l2-10h12l2 10z"/><path d="M5 11h14M9 6l-1 10M15 6l1 10M12 16v4M8 20h8"/>',
+  battery: '<rect x="4" y="7" width="15" height="10" rx="1.5"/><path d="M19 10h2v4h-2M8 12h7M11.5 9.5v5"/>',
+  floodlight: '<path d="M12 21V11M8 21h8"/><path d="M7 4h10l-2 7H9z"/><path d="M3 9l2 1M21 9l-2 1"/>',
+  siren: '<path d="M6 18a6 6 0 0 1 12 0zM4 18h16M12 12V9"/><path d="M4 6l2 2M20 6l-2 2M12 3v2"/>',
+  autoTurret: '<circle cx="10" cy="14" r="6"/><path d="M13 11l8-5"/><path d="M6 20h8"/>',
+  ammoPress: '<rect x="4" y="11" width="16" height="9" rx="1.5"/><path d="M9 11V5h6v6M12 5V2M8 16h2M13 16h3"/>',
+  renderVat: '<path d="M5 8h14l-1.5 12h-11z"/><path d="M8 13c1.5 1 2.5-1 4 0s2.5 1 4 0"/><path d="M9 4c0 2 1 2 1 4M14 4c0 2 1 2 1 4"/>',
+  shield: '<path d="M12 3l8 3v6c0 5-3.6 8-8 9-4.4-1-8-4-8-9V6z"/>',
+  noise: '<path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/>',
 };
 
 export const icon = (name, cls = '') =>

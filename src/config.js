@@ -79,6 +79,13 @@ export const COMFORT = { min: 8, max: 28 };
 export const EXPOSURE = { onset: 10, base: 0.00075, perDegree: 0.0000645, recoverMin: 0.0015, recoverMax: 0.015, recoverMul: 0.027 };
 export const ROOMS = { maxCells: 400, maxAutoRoof: 160, supportRange: 6, enclosedRoofed: 0.75, roofWork: 65 }; // (RW) 6-tile support, 75% roofed, 65 ticks
 
+// Phase 3 "The Hum" (docs/DESIGN.md §9)
+export const POWER = { poleRange: 6, poleLink: 8, dayStart: 6, dayEnd: 19 };
+// Fewer than 3 attackers barely dent a fence (a lone straggler needs ~2 days); its rattling draws friends.
+export const FENCE = { crowd: 3, loneFactor: 0.03 };
+// The Din: total machine noise → more strays and bigger hordes.
+export const DIN = { levels: [[0, 'Quiet'], [10, 'Humming'], [30, 'Loud'], [60, 'Deafening']], hordeMax: 0.6, hordePer: 1 / 100, strayPer: 1 / 40 };
+
 export const REANIMATE_DAYS = [0.08, 0.2]; // the dead rise again after this long
 export const ZOMBIE_CORPSE_ROT_DAYS = 2.5;
 export const MAX_ZOMBIES = 160;

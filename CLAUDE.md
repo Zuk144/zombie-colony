@@ -72,13 +72,15 @@ planned for Phase 3). It's built for iPad first.
 | `zones.js` | Stockpiles (5 priorities and a filter; corpses excluded by default), grow zones, **shelter zones** |
 | `rooms.js` | **Rooms and roofs**: 4-connected rooms bounded by walls, doors, and rock (not barricades); roles; impressiveness; roof support (6 cells) and collapse; auto-roof targets and roof areas; natural roofs from mining; `tempAt` |
 | `climate.js` | **Seasons and temperature**: outdoor curve plus day/night plus weather; room heat loss and heating; hypothermia and heatstroke (RW formulas); spoilage; frost; `growingSeason`; zombie cold slowdown |
-| `buildings.js` | **Per-building tick hook**: fuel burn, lit/heat state, heat per room. Phase 3 machines (power, production, noise) plug in here |
+| `buildings.js` | **Per-building tick hook**: supplies (`supplies(t)`: fuel and ammo slots haulers fill), fuel burn, lit/heat state, heat per room, **self-running machine benches** (press, vat), and **the Din** (running machines pulse `makeNoise` with themselves as the source; `w.din`) |
+| `power.js` | **Power grids**: poles link within 8 squares (Chebyshev) and power things within 6; union-find rebuild on `w.powerDirty`; per-grid supply/demand/battery balance each rare tick; brownouts; machine modes (`t.mode`: on / day / off) |
+| `perimeter.js` | **Secure yard**: flood fill from the map edge over zombie-walkable cells; unreached pockets bounded by something built are `w.secure`. `w.breach` = zombies inside, with a letter |
 | `pawn.js` | Survivor, zombie, and looter factories; needs; skills; `canFight`, `traitMult` |
 | `mood.js` | Thoughts (situational and memory, stacking), mood drift, break thresholds and rolls, catharsis |
 | `jobs.js` | **Job runner and job drivers** (toils + reserve + failIf): haul, deliver, build, repair, rearm, salvage, mine, cut, sow, bill (any recipe), equip, ammo, guard, shelter, eat, sleep, joy, mental states, leave or steal. Also carrying a downed pawn (`carryingPawn`/`carriedBy`) and `claimBed` |
 | `work.js` | WorkGivers per work type: Doctor (rescue, tend), bill givers per `workType` (cooking, crafting, hauling → burn pit), construction (repair, rearm, deliver, build, salvage), and more. **Emergency pass:** bodies about to rise get carried to a burn pit first. Then `findWork` (priority 1→4, left column first, then nearest target) |
 | `think.js` | Survivor think tree: downed → mental → **threat response** → urgent needs → **alarm** → **patient** (go to bed for treatment) → **guard shift** → sleep time → needs → **arm up** (better weapon, ammo) → joy → work → wander. Also `setAlarm` and `shouldInterrupt` |
-| `combat.js` | **Zombies and combat**: line of sight (barricades see-through), noise, the **shared zombie flow field**, zombie state machine (wander / investigate / hunt, bashing, **traps**), weapons (`weaponOf`, melee, **shooting = noise**), damage and bleeding, bites, going down, death, reanimation, fight and flee jobs, `fx` events |
+| `combat.js` | **Zombies and combat** (+ Phase 3: fence crowd rule, electric shocks, `wreck` state for noise-drawn zombies, broken machines, `tickTurrets`): line of sight (barricades see-through), noise, the **shared zombie flow field**, zombie state machine (wander / investigate / hunt, bashing, **traps**), weapons (`weaponOf`, melee, **shooting = noise**), damage and bleeding, bites, going down, death, reanimation, fight and flee jobs, `fx` events |
 | `medical.js` | **Health over time** (bleeding, healing, the **infection-vs-immunity race**), tend quality (skill × medicine), patient, tend, and rescue jobs |
 | `save.js` | Serialize and deserialize the world (JSON, Sets → arrays, derived state rebuilt, jobs dropped), localStorage slots (`auto`, `manual`) |
 | `director.js` | The Director: scripted intro (walker day 1, pack day 3), Cassandra threat cycle → hordes, strays (more at night), misc events, survivors joining |
@@ -91,7 +93,7 @@ planned for Phase 3). It's built for iPad first.
 | `art.js` | Every sprite as vector paths: people (facing, lunge, zombie arms), trees, crops, items, corpses, **connected walls**, doors, cars, furniture, badges, bars, labels. `lod` drops detail when zoomed out |
 | `render.js` | Camera transform, draw order, visible-cell culling, **night lighting** (half-res darkness mask with light sources punched out, plus a warm additive glow), overlays |
 | `input.js` | Gestures: one-finger pan (with inertia) or paint, pinch zoom, tap, mouse, trackpad, keys, animated camera jumps |
-| `ui.js` | HUD (clock, speed, **roster**, threat chip, **Alarm**), bottom **dock (Orders / Build / Furnish / Zones / Work) → tray → tool chip (Done)**, contextual inspector (bills with add/remove, crop picker, weapon, bleeding, infection race), Work sheet (**Priorities** and a finger-painted **Schedule**), menu (save, load, new game, auto-alarm, log, sandbox), tappable letters |
+| `ui.js` | HUD (clock, speed, **roster**, threat chip, **Alarm**, **secure-yard chip**, **Din**), layers button cycling Rooms → Yard → Power, bottom **dock (Orders / Build / Machines / Furnish / Zones / Work) → tray → tool chip (Done)**, contextual inspector (bills with add/remove, crop picker, weapon, bleeding, infection race), Work sheet (**Priorities** and a finger-painted **Schedule**), menu (save, load, new game, auto-alarm, log, sandbox), tappable letters |
 | `icons.js` | SVG line icons in the same stroke style as the world |
 | `main.js` | Boot (seed, load, or resume), autosave (every 6 in-game hours and on `visibilitychange`/`pagehide`), the fixed-timestep loop |
 
@@ -126,6 +128,11 @@ planned for Phase 3). It's built for iPad first.
 
 ### Adding things
 
+- **Machine:** `machine: true` plus `power: { draw }` (consumer), `{ output }` (+ `fuel` = generator,
+  `solar: true`), or `{ storage }` (battery); `noise` adds to the Din. A machine with `bench` +
+  `recipes` of `workType: 'machine'` runs its bills itself while powered; haulers stock it.
+  `ammoFeed` gives a loadable magazine. Draw it in `art.js` `drawMachine`, add it to the
+  Machines tray in `ui.js`, and give it an icon.
 - **Building:** a `THINGS` entry (`cost`, `work`, `hp`, flags) → a toolbar entry in the
   `CATEGORIES` Build or Furnish list in `ui.js` (plus a hint in `BUILD_HINTS`, and an icon in
   `icons.js` keyed by the def name) → a draw case in `render.js` (the `furniture` loop) and a
@@ -187,6 +194,11 @@ planned for Phase 3). It's built for iPad first.
   own zoom doesn't fight the game's. The page uses `viewport-fit=cover` and safe-area insets
   (`--sat`/`--sab` in CSS). `[hidden]` must stay `display:none !important`, because several
   panels set `display: flex`.
+- **Machines only make noise while running** (`isRunning`). Benches draw power only while they have
+  a stocked, wanted bill (`t.working`); turrets only with ammo; generators only when the grid
+  needs them. Broken machines (`t.broken`) are skipped by zombies' bash targeting and power.
+- **Fences** are `wallLike` + `seeThrough`, so they don't make rooms and don't block sight. One
+  attacker does `FENCE.loneFactor` damage; `FENCE.crowd` attackers do full damage.
 - At 1× an in-game hour is 42 real seconds (RimWorld pace). Test at 3×/6× or headless.
 
 ## Status
@@ -217,6 +229,13 @@ slowdown, room thoughts (bedroom, dining, barracks, slept outside or in the cold
 multi-cell rotatable placement, and the rooms overlay. Sim cost is about 0.5 s of CPU per game
 day for a 4-survivor defended base.
 
-**Next: Phase 3 automation**, a handful of machines. The spec, what 2b already prepared, the
-remaining engine work (including per-kind indexes to make `findWork` cheaper), and the
-milestones are in `docs/DESIGN.md` §9. Name still undecided.
+**Phase 3 "The Hum" (done, first pass):** see `docs/DESIGN.md` §9. Noise is the price of power
+(the Din feeds horde size and strays, and noise-drawn zombies wreck the machine). Fences with
+the crowd rule, gates, electric fences, secure yard and breach alerts. Power grids with
+generator, solar, batteries and brownouts. Floodlight, siren lure, auto-turret, ammo press,
+render vat (corpse → biofuel). Components from cars and loot. Headless: one grid of 3 poles ran
+10 machines on 1000 W + solar; a lone zombie barely dents a fence; the siren pulled zombies from
+40 squares and they wrecked it; 6 corpses → 48 biofuel.
+
+**Next:** balance the Din with real play; `findWork` per-kind indexes (≈ 5 ms per call now);
+Phase 4 (people and the world). Name still undecided.

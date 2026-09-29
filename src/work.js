@@ -11,7 +11,7 @@ import { findStorageCell } from './zones.js';
 import { haulJob, deliverJob, buildJob, repairJob, rearmJob, salvageJob, mineJob, cutJob, sowJob, billJob, roofJob, refuelJob } from './jobs.js';
 import { needsTending, rescueJob, tendJob, bestMedicine, pkey } from './medical.js';
 import { roofTargets } from './rooms.js';
-import { hasFuel, needsRefuel } from './buildings.js';
+import { hasFuel, needsSupply, supplies } from './buildings.js';
 import { growingSeason } from './climate.js';
 
 const free = (w, p, t) => !reservedByOther(w, tkey(t), p) && canReachThing(w, p, t);
@@ -36,10 +36,16 @@ function billWanted(w, bill) {
   return countOwned(w, r.product.def) < bill.target;
 }
 
-function refuel(w, p, t) {
-  const wood = nearestItem(w, p, (it) => it.def === 'wood');
-  const room = Math.floor(THINGS[t.def].fuel.capacity - (t.fuel ?? 0));
-  return wood && room > 0 ? refuelJob(w, wood, t, Math.min(room, CARRY_CAPACITY)) : null;
+// Top up a building's fuel or ammo, preferring the first accepted item (biofuel before wood).
+function refuel(w, p, t, slot = supplies(t)[0]) {
+  if (!slot) return null;
+  const room = Math.floor(slot.capacity - (t[slot.field] ?? 0));
+  if (room <= 0) return null;
+  for (const def of slot.items) {
+    const item = nearestItem(w, p, (it) => it.def === def && !zombieNear(w, it));
+    if (item) return refuelJob(w, item, t, Math.min(room, CARRY_CAPACITY), slot.field, slot.capacity);
+  }
+  return null;
 }
 
 // Don't send people out to patch a wall (or grab a body) while zombies are right there.
@@ -56,7 +62,7 @@ const billGiver = (workType) => ({
       if (r.workType !== workType || !billWanted(w, bill)) continue;
       if (!hasFuel(bench)) return refuel(w, p, bench); // no fire, no cooking: the cook fetches wood
       const missing = r.ingredients.find((ing) => (bench.stock[ingKey(ing)] ?? 0) < ing.count);
-      if (!missing) return billJob(w, bench, bill);
+      if (!missing) { if (THINGS[bench.def].machine) continue; return billJob(w, bench, bill); } // machines run themselves
       const item = nearestItem(w, p, (t) => ingMatches(missing, t) && !zombieNear(w, t), (t) => (t.reanimateAt ? 60 : 0));
       if (item) return deliverJob(w, item, bench, ingKey(missing), missing.count - (bench.stock[ingKey(missing)] ?? 0));
     }
@@ -151,9 +157,10 @@ export const GIVERS = {
 
   hauling: [
     billGiver('hauling'), // burn pit
+    billGiver('machine'), // keep the ammo press and render vat stocked
     {
-      targets: (w) => allThings(w, (t) => needsRefuel(t)),
-      job: (w, p, t) => (free(w, p, t) ? refuel(w, p, t) : null),
+      targets: (w) => allThings(w, (t) => needsSupply(t)),
+      job: (w, p, t) => (free(w, p, t) && !zombieNear(w, t) ? refuel(w, p, t, needsSupply(t)) : null),
     },
     {
       targets: (w) => allThings(w, (t, d) => d.kind === 'item'),

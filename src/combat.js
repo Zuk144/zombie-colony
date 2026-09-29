@@ -5,13 +5,15 @@
 // a multi-source Dijkstra outward from every survivor, where walls and doors cost "bash time"
 // proportional to their HP. Each zombie just steps downhill; if downhill is a wall, it bashes.
 
-import { TICKS_PER_DAY, SURVIVOR, ZOMBIE, REANIMATE_DAYS, ZOMBIE_CORPSE_ROT_DAYS, MOVE_CELLS_PER_TICK, THREAT_SCAN, MEDICAL } from './config.js';
+import { TICKS_PER_DAY, SURVIVOR, ZOMBIE, REANIMATE_DAYS, ZOMBIE_CORPSE_ROT_DAYS, MOVE_CELLS_PER_TICK, THREAT_SCAN, MEDICAL, FENCE } from './config.js';
 import { THINGS } from './defs.js';
 import { findPath, Heap } from './path.js';
 import {
   idx, inBounds, DIRS, blocksSight, zombieCost, bashTargetAt, spawnItem, despawn, colonists, letter, dist,
-  allThings, canReach, randomReachableCell, moveCost, isNight, reservedByOther, ckey, thingsAt,
+  allThings, canReach, randomReachableCell, moveCost, isNight, reservedByOther, ckey, thingsAt, sizeOf,
 } from './world.js';
+import { isPowered } from './power.js';
+import { isRunning, isLit, litByFloodlight } from './buildings.js';
 import { makeZombie, traitMult, canFight, isGentle, learn } from './pawn.js';
 import { addMemory } from './mood.js';
 import { endJob, removePawn, dropCarried, stepMove, face, goTo, wait, DONE, FAIL } from './jobs.js';
@@ -52,16 +54,21 @@ export function canSee(w, ax, ay, bx, by) {
   return true;
 }
 
-// Anything loud pulls idle zombies within `radius` toward it.
-export function makeNoise(w, x, y, radius) {
+// Anything loud pulls idle zombies within `radius` toward it. If the noise came from a
+// machine, they remember it: arriving, they go after the machine itself (state 'wreck').
+export function makeNoise(w, x, y, radius, source = null) {
   for (const z of w.pawns) {
-    if (z.faction !== 'zombie' || z.state === 'hunt') continue;
+    if (z.faction !== 'zombie' || z.state === 'hunt' || z.state === 'wreck') continue;
     if (Math.abs(z.x - x) > radius || Math.abs(z.y - y) > radius) continue;
+    if (z.state === 'investigate' && z.noiseSource === source?.id) continue; // already on its way
     z.state = 'investigate';
+    z.noiseSource = source?.id ?? null;
     z.goal = { x: clamp(x + w.rng.int(-2, 2), 0, w.w - 1), y: clamp(y + w.rng.int(-2, 2), 0, w.h - 1) };
     z.path = null;
   }
 }
+
+const machineActive = (w, t) => !!t && !t.broken && w.things.has(t.id) && (isRunning(w, t) || isLit(w, t));
 
 // ---- Zombie flow field ----------------------------------------------------
 
@@ -115,6 +122,7 @@ export function tickZombie(w, z) {
   }
   if (z.state === 'hunt') huntStep(w, z);
   else if (z.state === 'investigate') goalStep(w, z);
+  else if (z.state === 'wreck') wreckStep(w, z);
   else wanderStep(w, z);
 }
 
@@ -207,10 +215,33 @@ function goalStep(w, z) {
   while (z.pathI < z.path.length && z.path[z.pathI][0] === z.x && z.path[z.pathI][1] === z.y) z.pathI++;
   const next = z.path[z.pathI];
   if (!next || Math.abs(next[0] - z.x) > 1 || Math.abs(next[1] - z.y) > 1) {
-    z.state = 'wander';
+    // Arrived. If a machine made the noise and it's still going, go wreck it.
+    const src = z.noiseSource != null ? w.things.get(z.noiseSource) : null;
     z.goal = z.path = null;
+    if (machineActive(w, src)) { z.state = 'wreck'; z.wreckId = src.id; }
+    else z.state = 'wander';
     return;
   }
+  tryStep(w, z, next[0], next[1]);
+}
+
+function wreckStep(w, z) {
+  const t = w.things.get(z.wreckId);
+  if (!machineActive(w, t)) { z.state = 'wander'; z.wreckId = z.path = null; return; }
+  if (dist(z, t) <= 1) {
+    face(z, t);
+    if (z.attackCd <= 0) bash(w, z, t);
+    return;
+  }
+  if (!z.path || z.pathI >= z.path.length) {
+    const [sw, sh] = sizeOf(t);
+    z.path = findPath(w, z.x, z.y, { x: t.x, y: t.y, w: sw, h: sh, touch: true }, zombieCost);
+    z.pathI = 0;
+    if (!z.path || !z.path.length) { z.state = 'wander'; z.wreckId = z.path = null; return; }
+  }
+  while (z.pathI < z.path.length && z.path[z.pathI][0] === z.x && z.path[z.pathI][1] === z.y) z.pathI++;
+  const next = z.path[z.pathI];
+  if (!next || Math.abs(next[0] - z.x) > 1 || Math.abs(next[1] - z.y) > 1) { z.path = null; return; }
   tryStep(w, z, next[0], next[1]);
 }
 
@@ -229,14 +260,32 @@ function zombieAttack(w, z, victim) {
 }
 
 function bash(w, z, b) {
+  const d = THINGS[b.def];
   z.attackCd = ZOMBIE.cooldown;
   z.lunge = w.tick;
-  b.hp -= w.rng.range(...ZOMBIE.buildingDamage);
+  let dmg = w.rng.range(...ZOMBIE.buildingDamage);
+  // Fences: a lone straggler just rattles one; it takes a crowd pushing together.
+  if (d.fence && w.pawns.filter((o) => o.faction === 'zombie' && dist(o, b) <= 1).length < FENCE.crowd) dmg *= FENCE.loneFactor;
+  if (d.electric && isPowered(w, b)) {
+    fx(w, { kind: 'zap', x: b.x, y: b.y });
+    z.attackCd += d.electric.stagger;
+    hurtPawn(w, z, w.rng.range(...d.electric.damage));
+    if (z.gone) return;
+  }
+  b.hp -= dmg;
   b.lastHit = w.tick;
   if (w.tick % 3 === 0) makeNoise(w, b.x, b.y, 8); // banging on walls draws a crowd
   // Fighters nearby hear it and come out to deal with it.
   for (const p of w.pawns) if (p.faction === 'colony' && dist(p, b) <= 16) p.heard = { z, tick: w.tick };
   if (b.hp > 0) return;
+  if (d.machine) { // machines break instead of vanishing; a builder can repair them
+    b.hp = 0;
+    b.broken = true;
+    b.running = false;
+    w.fieldDirty = true;
+    letter(w, `Zombies wrecked the ${d.label.toLowerCase()}. A builder can repair it.`, 'bad', b);
+    return;
+  }
   despawn(w, b);
   w.fieldDirty = true;
   if (THINGS[b.def].cost && w.tick - (w.lastBreachLetter ?? -1e9) > 2500) { // only your buildings are news
@@ -316,7 +365,9 @@ export function scanThreat(w, p) {
   for (const z of w.pawns) {
     if (z.faction !== 'zombie') continue;
     const d = dist(p, z);
-    if (d > sight || d >= bestD) continue;
+    if (d >= bestD) continue;
+    // At night, zombies standing in a floodlight's pool can be seen from much farther.
+    if (d > sight && !(isNight(w.tick) && d <= 18 && litByFloodlight(w, z.x, z.y))) continue;
     if (d > 1 && !canSee(w, p.x, p.y, z.x, z.y)) continue;
     best = z;
     bestD = d;
@@ -348,6 +399,30 @@ function shoot(w, a, target, wpn) {
   const hit = w.rng.chance(p);
   fx(w, { kind: 'shot', x0: a.x, y0: a.y, x1: target.x + (hit ? 0 : w.rng.range(-1.2, 1.2)), y1: target.y + (hit ? 0 : w.rng.range(-1.2, 1.2)), hit });
   if (hit) hurtPawn(w, target, w.rng.range(...wpn.damage) * (1 + 0.03 * lvl), a);
+}
+
+// Auto-turrets: powered, loaded, and in range with a clear line of sight. Loud.
+export function tickTurrets(w) {
+  for (const t of allThings(w, (t, d) => d.turret)) {
+    const d = THINGS[t.def], tu = d.turret;
+    t.cd = Math.max(0, (t.cd ?? 0) - THREAT_SCAN);
+    if (t.cd > 0 || !(t.ammo > 0) || !isPowered(w, t)) continue;
+    let best = null, bestD = Infinity;
+    for (const z of w.pawns) {
+      if (z.faction !== 'zombie') continue;
+      const dd = dist(z, t);
+      if (dd <= tu.range && dd < bestD && canSee(w, t.x, t.y, z.x, z.y)) { best = z; bestD = dd; }
+    }
+    if (!best) continue;
+    t.cd = tu.cooldown;
+    t.ammo--;
+    t.aim = Math.atan2(best.y - t.y, best.x - t.x);
+    t.lastShot = w.tick;
+    makeNoise(w, t.x, t.y, tu.noise);
+    const hit = w.rng.chance(clamp(tu.accuracy * (1 - (0.3 * bestD) / (tu.range + 3)), 0.1, 0.95));
+    fx(w, { kind: 'shot', x0: t.x, y0: t.y, x1: best.x + (hit ? 0 : w.rng.range(-1.2, 1.2)), y1: best.y + (hit ? 0 : w.rng.range(-1.2, 1.2)), hit });
+    if (hit) hurtPawn(w, best, w.rng.range(...tu.damage));
+  }
 }
 
 // Fighters only take fights they can win: more than ~2 zombies per nearby fighter means fall back.

@@ -4,7 +4,8 @@
 import { TILE, COMFORT } from './config.js';
 import { THINGS, ROOM_ROLES } from './defs.js';
 import { hourFloat, inBounds, thingsAt, sizeOf, allThings } from './world.js';
-import { isLit } from './buildings.js';
+import { isLit, isRunning } from './buildings.js';
+import { isPowered, wantsPower, modeAllows, netOf } from './power.js';
 import { seasonOf } from './climate.js';
 import { roofWantedAt, unroofWantedAt } from './rooms.js';
 import { createTerrainArt } from './terrainArt.js';
@@ -138,13 +139,14 @@ export function createRenderer(canvas, w) {
       if (t.def === 'car') A.drawCar(ctx, t, px, lod);
       else if (t.def === 'bed') A.drawBed(ctx, t, px);
       else if (t.def === 'table') A.drawTable(ctx, t, px, lod, ...sizeOf(t));
-      else if (t.def === 'campfire') A.drawCampfire(ctx, t, now, px, isLit(t));
-      else if (t.def === 'woodStove') A.drawStove(ctx, t, now, px, isLit(t));
+      else if (t.def === 'campfire') A.drawCampfire(ctx, t, now, px, isLit(w, t));
+      else if (t.def === 'woodStove') A.drawStove(ctx, t, now, px, isLit(w, t));
       else if (t.def === 'torch') A.drawTorch(ctx, t, now, px);
       else if (t.def === 'spikeTrap') A.drawTrap(ctx, t, px, lod);
       else if (t.def === 'workbench') A.drawWorkbench(ctx, t, px, lod);
       else if (t.def === 'burnPit') A.drawBurnPit(ctx, t, now, px);
       else if (t.def === 'guardPost') A.drawGuardPost(ctx, t, px, lod);
+      else if (THINGS[t.def].machine || THINGS[t.def].pole) A.drawMachine(ctx, t, now, px, lod, ...sizeOf(t), machineState(t));
     }
     if (walls.length) A.drawWalls(ctx, walls, connects, px, lod);
     for (const t of doors) {
@@ -220,7 +222,9 @@ export function createRenderer(canvas, w) {
 
     drawLighting(now, x0, x1, y0, y1);
     worldTransform();
-    if (ui.overlay) drawRoomsOverlay(ui, px, x0, x1, y0, y1);
+    if (ui.overlay === 'rooms') drawRoomsOverlay(ui, px, x0, x1, y0, y1);
+    else if (ui.overlay === 'yard') drawYardOverlay(px, x0, x1, y0, y1);
+    else if (ui.overlay === 'power') drawPowerOverlay(px);
     drawOverlay(ui, px, now);
   }
 
@@ -234,7 +238,7 @@ export function createRenderer(canvas, w) {
     lctx.fillRect(0, 0, light.width, light.height);
     lctx.globalCompositeOperation = 'destination-out';
     const lights = [];
-    for (const t of allThings(w, (t, d) => d.light && isLit(t))) {
+    for (const t of allThings(w, (t, d) => d.light && isLit(w, t))) {
       const r = THINGS[t.def].light;
       if (t.x < x0 - r || t.x > x1 + r || t.y < y0 - r || t.y > y1 + r) continue;
       const flicker = 1 + Math.sin(now / 110 + t.id) * 0.03 + Math.sin(now / 47 + t.id * 3) * 0.02;
@@ -270,6 +274,13 @@ export function createRenderer(canvas, w) {
     ctx.globalCompositeOperation = 'source-over';
   }
 
+  function machineState(t) {
+    const d = THINGS[t.def];
+    const powered = d.pole ? !!netOf(w, t)?.powered : isPowered(w, t);
+    const wants = !!d.power?.draw && !t.broken && modeAllows(w, t);
+    return { powered, on: powered && wantsPower(w, t), running: isRunning(w, t), broken: !!t.broken, unpowered: wants && !powered };
+  }
+
   // Tracers, muzzle flashes, trap snaps. Each event is stamped with real time the first frame
   // it's seen, so effects read the same at any game speed.
   function drawFx(now) {
@@ -285,6 +296,14 @@ export function createRenderer(canvas, w) {
         ctx.fillStyle = `rgba(255, 210, 90, ${1 - k})`;
         ctx.beginPath(); ctx.arc(x0 + (x1 - x0) * 0.06, y0 + (y1 - y0) * 0.06, 3 * (1 - k) + 0.5, 0, Math.PI * 2); ctx.fill();
         if (e.hit) { ctx.fillStyle = `rgba(120, 20, 20, ${0.8 * (1 - k)})`; ctx.beginPath(); ctx.arc(x1, y1, 2 + 3 * k, 0, Math.PI * 2); ctx.fill(); }
+      } else if (e.kind === 'zap') {
+        const cx = (e.x + 0.5) * T, cy = (e.y + 0.5) * T;
+        ctx.strokeStyle = `rgba(255, 240, 120, ${1 - k})`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(cx - 6, cy);
+        for (let i = 1; i <= 5; i++) ctx.lineTo(cx - 6 + i * 2.4, cy + ((i * 7 + e.id) % 5) - 2.5);
+        ctx.stroke();
       } else if (e.kind === 'trap') {
         const cx = (e.x + 0.5) * T, cy = (e.y + 0.5) * T;
         ctx.strokeStyle = `rgba(220, 60, 50, ${1 - k})`;
@@ -335,6 +354,55 @@ export function createRenderer(canvas, w) {
       ctx.fill(edge);
       const label = `${ROOM_ROLES[r.role]} ${ui.fmtTemp(r.temp)}${r.indoors ? '' : ' · open'}`; // details live in the room inspector
       A.drawLabel(ctx, label, (sx / r.size + 0.5) * T, (sy / r.size + 0.5) * T);
+    }
+  }
+
+  // Secure yard: cells zombies can't reach without breaking something; zombies inside are circled.
+  function drawYardOverlay(px, x0, x1, y0, y1) {
+    const safe = new Path2D();
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (w.secure[y * w.w + x]) safe.rect(x * T, y * T, T, T);
+    ctx.fillStyle = 'rgba(120, 230, 140, 0.22)';
+    ctx.fill(safe);
+    for (const z of w.pawns) {
+      if (z.faction !== 'zombie' || !w.secure[z.y * w.w + z.x]) continue;
+      const p = pawnPos(z);
+      ctx.strokeStyle = '#ff5a4a'; ctx.lineWidth = 2 * px;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  // Power: each grid in its own color, pole reach, pole-to-pole links, and a supply label.
+  const GRID_COLORS = ['#f2d24a', '#6fc3ff', '#b58cff', '#7ed957', '#ff9a5c'];
+  function drawPowerOverlay(px) {
+    w.networks.forEach((net, i) => {
+      const col = net.powered ? GRID_COLORS[i % GRID_COLORS.length] : '#e05a4a';
+      ctx.strokeStyle = col; ctx.fillStyle = col;
+      for (const p of net.poles) {
+        const cx = (p.x + 0.5) * T, cy = (p.y + 0.5) * T;
+        ctx.globalAlpha = 0.08;
+        ctx.fillRect((p.x - 6) * T, (p.y - 6) * T, 13 * T, 13 * T);
+        ctx.globalAlpha = 0.9;
+        ctx.lineWidth = 1.2 * px;
+        for (const q of net.poles) if (q !== p && Math.max(Math.abs(q.x - p.x), Math.abs(q.y - p.y)) <= 8) { ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo((q.x + 0.5) * T, (q.y + 0.5) * T); ctx.stroke(); }
+      }
+      for (const m of net.members) {
+        const [sw, sh] = sizeOf(m);
+        ctx.lineWidth = 1.6 * px;
+        ctx.strokeRect(m.x * T + 1, m.y * T + 1, sw * T - 2, sh * T - 2);
+      }
+      ctx.globalAlpha = 1;
+      const a = net.poles[0] ?? net.members[0];
+      if (a) {
+        const bat = net.capacity ? ` · battery ${Math.round((100 * net.stored) / net.capacity)}%` : '';
+        A.drawLabel(ctx, `${net.powered ? '' : 'BROWNOUT · '}${net.supply} W / ${net.demand} W${bat}`, (a.x + 0.5) * T, (a.y - 0.8) * T, col);
+      }
+    });
+    // Powered things with no pole in reach.
+    for (const t of allThings(w, (t, d) => d.power && !w.powerNet.has(t.id))) {
+      const [sw, sh] = sizeOf(t);
+      ctx.setLineDash([3 * px, 3 * px]); ctx.strokeStyle = '#e05a4a'; ctx.lineWidth = 1.6 * px;
+      ctx.strokeRect(t.x * T + 1, t.y * T + 1, sw * T - 2, sh * T - 2);
+      ctx.setLineDash([]);
     }
   }
 

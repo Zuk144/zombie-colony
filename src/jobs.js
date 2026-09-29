@@ -255,7 +255,7 @@ export function repairJob(w, b) {
   return {
     def: 'repair', kind: 'work', report: `repairing ${def.label.toLowerCase()}`, target: b, reserve: [tkey(b)],
     failIf: (w, p, j) => !isSpawned(w, j.target),
-    toils: [goTo((j) => j.target, true), work({ amount: () => (def.hp - b.hp) * 0.6, skill: 'construction', target: (j) => j.target, onDone: () => { b.hp = def.hp; } })],
+    toils: [goTo((j) => j.target, true), work({ amount: () => (def.hp - b.hp) * 0.6, skill: 'construction', target: (j) => j.target, onDone: () => { b.hp = def.hp; b.broken = false; } })],
   };
 }
 
@@ -392,9 +392,10 @@ export function roofJob(w, x, y, remove) {
 }
 
 // Fill a campfire or stove with wood.
-export function refuelJob(w, item, target, count) {
+// Load fuel or ammo into a building (`field`: 'fuel' or 'ammo', see buildings.supplies).
+export function refuelJob(w, item, target, count, field = 'fuel', capacity = THINGS[target.def].fuel.capacity) {
   return {
-    def: 'refuel', kind: 'work', report: `refueling the ${label(target.def)}`, item, target,
+    def: 'refuel', kind: 'work', report: field === 'ammo' ? `loading the ${label(target.def)}` : `refueling the ${label(target.def)}`, item, target,
     reserve: [tkey(item), tkey(target)],
     failIf: (w, p, j) => !isSpawned(w, j.target) || (!p.carrying && !isSpawned(w, j.item)),
     toils: [
@@ -402,9 +403,8 @@ export function refuelJob(w, item, target, count) {
       pickUp('item', () => count),
       goTo((j) => j.target, true),
       instant((w, p, j) => {
-        const cap = THINGS[j.target.def].fuel.capacity;
-        const used = Math.max(0, Math.min(p.carrying.count, Math.floor(cap - (j.target.fuel ?? 0)))); // whole logs only
-        j.target.fuel = (j.target.fuel ?? 0) + used;
+        const used = Math.max(0, Math.min(p.carrying.count, Math.floor(capacity - (j.target[field] ?? 0)))); // whole items only
+        j.target[field] = (j.target[field] ?? 0) + used;
         p.carrying.count -= used;
         if (p.carrying.count <= 0) p.carrying = null;
       }),
