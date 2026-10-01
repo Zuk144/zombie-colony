@@ -86,6 +86,9 @@ export const FENCE = { crowd: 3, loneFactor: 0.03 };
 // Hacking through the wire (DESIGN §4): blades reach across a see-through barrier, and the dead
 // grab back. Multipliers on the normal melee hit chances.
 export const WIRE = { reachHit: 0.8, grabHit: 0.5 };
+// What the dead carry (docs/studio/briefs/2026-09-30-component-economy.md): rolled on every
+// zombie's death, dropped where it falls. Curve knobs: components 8–20%, scrap 25–50%.
+export const DROPS = { componentChance: 0.12, scrapChance: 0.35, scrap: [2, 6] };
 // The Din: total machine noise → more strays and bigger hordes.
 export const DIN = { levels: [[0, 'Quiet'], [10, 'Humming'], [30, 'Loud'], [60, 'Deafening']], hordeMax: 0.6, hordePer: 1 / 100, strayPer: 1 / 40 };
 

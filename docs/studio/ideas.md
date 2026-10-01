@@ -22,6 +22,8 @@ DESIGN.md; rejected ones stay here with a note, so we don't reinvent them.
 - ★★ Variety drives upgrades: rooms or survivors want *different* goods, not more. [Manor Lords]
 - ★★ A finite resource you rearrange, not spend (e.g. how much fence one grid can electrify). [Songs of Syx water table]
 - ★ Clothing extends how far survivors can safely work in winter. [Banished]
+- ★★ Appliances in ruins (a fridge, a TV, a washing machine) that strip into components. The town held things. [component-economy brief → "What the dead carried"]
+- ✗ Rejected: a workbench recipe turning scrap into components. It fails pillar 2 (income with no noise or risk). [component-economy brief, 2026-09-30]
 - ★ Tools and weapons wear out, giving the workbench steady demand. [Banished]
 
 ## Threat and the Director

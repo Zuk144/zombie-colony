@@ -287,6 +287,14 @@ Against 12 hunters, a runner makes 1–3 mid-horde refills (none without one) an
 Against 25 at once, a fence section falls in about 40 minutes whatever you do; wave size is
 slice 1b's job.
 
-**Next:** slice 1b (announced waves, steeper Din, after-wave tally), then "What the dead
+**Component economy (done):** the dead carry parts (`DROPS` in config: 12% a component, 35%
+2–6 scrap, dropped where they fall), 9–13 wrecked cars, your own machines refund every
+component when taken apart, and electric fences cost scrap only. The Machines tray shows
+your stock and what each machine is short of. About 26 components per map plus the field
+(`docs/studio/briefs/2026-09-30-component-economy.md`).
+
+**Next:** base defense (CDO brief in progress: nobody answers zombies at the fence unless
+armed and in range, and destroyed fence sections are never rebuilt), then slice 1b (announced
+waves, steeper Din, after-wave tally), then "What the dead
 carried" (item depth), then reclaim. `findWork` per-kind indexes (≈ 5 ms per call now). Name
 still undecided.

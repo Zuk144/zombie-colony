@@ -5,7 +5,7 @@
 // a multi-source Dijkstra outward from every survivor, where walls and doors cost "bash time"
 // proportional to their HP. Each zombie just steps downhill; if downhill is a wall, it bashes.
 
-import { TICKS_PER_DAY, SURVIVOR, ZOMBIE, REANIMATE_DAYS, ZOMBIE_CORPSE_ROT_DAYS, MOVE_CELLS_PER_TICK, THREAT_SCAN, MEDICAL, FENCE, WIRE } from './config.js';
+import { TICKS_PER_DAY, SURVIVOR, ZOMBIE, REANIMATE_DAYS, ZOMBIE_CORPSE_ROT_DAYS, MOVE_CELLS_PER_TICK, THREAT_SCAN, MEDICAL, FENCE, WIRE, DROPS } from './config.js';
 import { THINGS } from './defs.js';
 import { findPath, Heap } from './path.js';
 import {
@@ -334,6 +334,16 @@ function killZombie(w, z) {
   removePawn(w, z);
   w.stats.zombiesKilled++;
   spawnItem(w, 'corpse', 1, z.x, z.y, { name: z.name, zombie: true, look: z.look, rotAt: w.tick + ZOMBIE_CORPSE_ROT_DAYS * TICKS_PER_DAY });
+  // The dead carry things: a circuit board now and then, scrap more often. It drops where they
+  // fall (usually outside the wire), and haulers bring it in once it's quiet.
+  if (w.rng.chance(DROPS.componentChance)) {
+    spawnItem(w, 'components', 1, z.x, z.y);
+    if (w.story && !w.story.firstPartDrop) {
+      w.story.firstPartDrop = true;
+      letter(w, 'One of the dead was carrying a circuit board. Haulers will bring it in when it’s quiet.', 'good', { x: z.x, y: z.y });
+    }
+  }
+  if (w.rng.chance(DROPS.scrapChance)) spawnItem(w, 'scrap', w.rng.int(...DROPS.scrap), z.x, z.y);
 }
 
 export function killHuman(w, p, cause, riseInDays = w.rng.range(...REANIMATE_DAYS)) {

@@ -231,7 +231,19 @@ export function createUI(w, r) {
     const toolCat = CATEGORIES.find((c) => c.tools.includes(TOOL[ui.tool]))?.key;
     for (const b of dock.querySelectorAll('[data-cat]')) b.classList.toggle('active', b.dataset.cat === (ui.openCat ?? toolCat));
     if (!cat) return;
-    tray.innerHTML = cat.tools.map((t) => `<button data-tool="${t.key}" class="${ui.tool === t.key ? 'active' : ''}">${icon(t.icon)}<b>${esc(t.label)}</b>${t.cost ? `<small>${esc(t.cost)}</small>` : t.hotkey ? `<small><kbd>${t.hotkey.toUpperCase()}</kbd></small>` : ''}</button>`).join('');
+    // Machines show what you have to build with, and what each machine is still short of.
+    const stock = cat.key === 'machines'
+      ? `<div class="tray-stock">${icon('components')}<b>Components ${countOwned(w, 'components')}</b><b>Scrap ${countOwned(w, 'scrap')}</b><small>More parts: strip wrecked cars. The dead sometimes carry them.</small></div>` : '';
+    const shortOf = (t) => {
+      const cost = t.key.startsWith('build:') ? THINGS[t.key.slice(6)].cost ?? {} : {};
+      for (const [k, n] of Object.entries(cost)) { const miss = n - countOwned(w, k); if (miss > 0) return `need ${miss} more ${THINGS[k].label.toLowerCase()}`; }
+      return null;
+    };
+    tray.innerHTML = stock + cat.tools.map((t) => {
+      const short = cat.key === 'machines' ? shortOf(t) : null;
+      const sub = short ? `<small class="short">${esc(short)}</small>` : t.cost ? `<small>${esc(t.cost)}</small>` : t.hotkey ? `<small><kbd>${t.hotkey.toUpperCase()}</kbd></small>` : '';
+      return `<button data-tool="${t.key}" class="${ui.tool === t.key ? 'active' : ''}">${icon(t.icon)}<b>${esc(t.label)}</b>${sub}</button>`;
+    }).join('');
   }
   $('tray').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-tool]');
@@ -724,7 +736,10 @@ export function createUI(w, r) {
     if (d.kind === 'blueprint') {
       const bd = THINGS[t.builds];
       const mats = Object.entries(bd.cost).map(([k, n]) => `<li><span>${THINGS[k].label}</span><span>${t.stock[k] ?? 0} / ${n}</span></li>`).join('');
-      return head(`${bd.label}`, 'Blueprint') + `<ul class="thoughts">${mats}</ul><p class="hint">Builders deliver materials, then construct.</p>` + actions(t);
+      // Stalled: the colony doesn't own enough of something to finish it.
+      const waiting = Object.entries(bd.cost).map(([k, n]) => [k, n - (t.stock[k] ?? 0) - countOwned(w, k)]).filter(([, m]) => m > 0)
+        .map(([k, m]) => `<p class="alert-line">Waiting for ${m} ${THINGS[k].label.toLowerCase()}.${k === 'components' ? ' Strip wrecked cars, or collect what the dead drop.' : ''}</p>`).join('');
+      return head(`${bd.label}`, 'Blueprint') + `<ul class="thoughts">${mats}</ul>${waiting}<p class="hint">Builders deliver materials, then construct.</p>` + actions(t);
     }
     if (d.machine || d.pole || d.electric) return head(d.label, BUILD_HINTS[t.def] ?? '') + hp + machineHTML(t, d) + fuelHTML(t, d) + (d.bench ? billsHTML(t, d) : '') + actions(t);
     if (d.bench) return head(d.label, BUILD_HINTS[t.def] ?? '') + hp + fuelHTML(t, d) + billsHTML(t, d) + actions(t);

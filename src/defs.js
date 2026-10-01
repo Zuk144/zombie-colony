@@ -70,7 +70,7 @@ export const THINGS = {
   // ---- Phase 3 "The Hum" ----
   // Fences: see-through, stop zombies; a lone attacker barely dents one (FENCE.loneFactor).
   fence: { kind: 'building', label: 'Chain-link fence', wallLike: true, fence: true, seeThrough: true, reachThrough: true, blocks: true, hp: 200, cost: { scrap: 2 }, work: 90 },
-  electricFence: { kind: 'building', label: 'Electric fence', wallLike: true, fence: true, seeThrough: true, reachThrough: true, blocks: true, hp: 240, cost: { scrap: 3, components: 1 }, work: 160,
+  electricFence: { kind: 'building', label: 'Electric fence', wallLike: true, fence: true, seeThrough: true, reachThrough: true, blocks: true, hp: 240, cost: { scrap: 4 }, work: 160,
     power: { draw: 15 }, electric: { damage: [8, 14], stagger: 150 } },
   gate: { kind: 'building', label: 'Gate', door: true, gate: true, reachThrough: true, hp: 200, cost: { scrap: 6 }, work: 200 },
   // Machines. power.output / power.draw in W, power.storage in Wd; noise = Din pulse radius.
@@ -170,9 +170,12 @@ export const buildingValue = (def) =>
   Object.entries(def.cost ?? {}).reduce((v, [k, n]) => v + THINGS[k].value * n, 0);
 
 // What deconstructing/salvaging a building gives back.
+// Taking a building apart returns half its materials, but your own machines give back every
+// component, so moving a turret or redesigning a power grid isn't punished.
 export function salvageYield(def) {
   if (def.salvage) return def.salvage.yield;
-  return Object.entries(def.cost ?? {}).map(([k, n]) => [k, Math.floor(n / 2)]).filter(([, n]) => n > 0);
+  const full = (k) => k === 'components' && (def.machine || def.electric);
+  return Object.entries(def.cost ?? {}).map(([k, n]) => [k, full(k) ? n : Math.floor(n / 2)]).filter(([, n]) => n > 0);
 }
 export const salvageWork = (def) => def.salvage?.work ?? Math.max(60, (def.work ?? 100) * 0.5);
 export const canSalvage = (def) => def.kind === 'building' && !def.natural && (def.salvage || def.cost);

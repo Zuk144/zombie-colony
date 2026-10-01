@@ -153,7 +153,7 @@ function ruinFits(w, r, occupied, cx, cy) {
 
 function placeCars(w, roads, occupied) {
   const { rng } = w;
-  const n = rng.int(6, 10);
+  const n = rng.int(9, 13); // each strips for 25 scrap and 2 components
   for (let i = 0, tries = 0; i < n && tries < 100; tries++) {
     const road = rng.pick(roads);
     const [px, py] = rng.pick(road.pts);
