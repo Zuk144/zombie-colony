@@ -15,15 +15,18 @@ import { makeNoise } from './combat.js';
 
 // ---- Supplies: fuel and ammo, loaded by haulers ------------------------------------
 
-// Every refillable slot on a building: { field, items, capacity }.
+// Every refillable slot on a building: { field, items, capacity, refillAt }. A slot asks for a
+// top-up once it drops below `refillAt` of capacity (guns earlier, so they're fed mid-fight).
 export function supplies(t) {
   const d = THINGS[t.def], out = [];
-  if (d.fuel) out.push({ field: 'fuel', items: d.fuel.items ?? ['wood'], capacity: d.fuel.capacity });
-  if (d.ammoFeed) out.push({ field: 'ammo', items: ['ammo'], capacity: d.ammoFeed.capacity });
+  if (d.fuel) out.push({ field: 'fuel', items: d.fuel.items ?? ['wood'], capacity: d.fuel.capacity, refillAt: d.fuel.refillAt ?? 0.4 });
+  if (d.ammoFeed) out.push({ field: 'ammo', items: ['ammo'], capacity: d.ammoFeed.capacity, refillAt: d.ammoFeed.refillAt ?? 0.5 });
   return out;
 }
 export const hasFuel = (t) => !THINGS[t.def].fuel || t.fuel > 0;
-export const needsSupply = (t) => supplies(t).find((s) => (t[s.field] ?? 0) < s.capacity * 0.4) ?? null;
+export const needsSupply = (t) => supplies(t).find((s) => (t[s.field] ?? 0) < s.capacity * s.refillAt) ?? null;
+// How full a building's emptiest slot is (0..1), or null if it has none.
+export const supplyFrac = (t) => { const s = supplies(t); return s.length ? Math.min(...s.map((sl) => Math.min(1, (t[sl.field] ?? 0) / sl.capacity))) : null; };
 export const needsRefuel = (t) => !!needsSupply(t);
 
 export function isLit(w, t) {

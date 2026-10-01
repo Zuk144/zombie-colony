@@ -167,3 +167,5 @@ export function exposureSlow(p) {
 export const traitMult = (p, field) => p.traits.reduce((m, t) => m * (TRAITS[t][field] ?? 1), 1);
 export const isGentle = (p) => p.traits.some((t) => TRAITS[t].noViolence);
 export const canFight = (p) => p.response === 'fight' && !isGentle(p);
+// Supply: when the dead come, keep the guns fed and the generator running.
+export const isRunner = (p) => p.response === 'supply';

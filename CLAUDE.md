@@ -2,11 +2,14 @@
 
 ## Vision
 
-**A touch-first colony sim about keeping a handful of survivors alive, and sane, through the
-zombie apocalypse. You plan; they live it.** It mixes RimWorld (indirect control, needs, mood,
-storyteller), Project Zomboid (noise, night, scavenging, bites), The Walking Dead (everyone
-who dies turns), Prison Architect (clean top-down vector look), and Factorio (automation,
-planned for Phase 3). It's built for iPad first.
+**Build a fortress that runs on people. Someone has to carry every bullet, and the dead you
+kill pay for the next ones. You plan; they live it.** The base is the body; the people are the
+blood. Pillars (DESIGN §1): the base runs on people, noise is the dial, everything the dead
+carried is worth something. It mixes RimWorld (indirect control, needs, mood, storyteller),
+Project Zomboid (noise, scavenging, bites), The Walking Dead (everyone who dies turns), They Are
+Billions (walls, hordes, announced waves), Cosmoteer (visible logistics fixed by layout), Prison
+Architect (clean top-down vector look), and Factorio (your output feeds your enemy). It's built
+for iPad first.
 
 - **`docs/DESIGN.md`** is the design bible: pillars, influences, the indirect-defense model,
   zombies, infection, the Director, touch UX, art direction, roadmap, and open questions.
@@ -17,7 +20,7 @@ planned for Phase 3). It's built for iPad first.
 **Design rules (non-negotiable without discussion):**
 1. **Never add a tool that orders a specific survivor to do a specific thing.** Every lever
    changes the *conditions* they decide under: designations, blueprints, zones, priorities,
-   the Fight/Flee response, bills, and (later) schedules.
+   the Fight/Supply/Flee response, bills, and schedules.
 2. **Touch first.** Every action must work with one finger (tap or drag) plus two-finger
    pan and zoom. Targets are ≥ 44 pt. Nothing important lives in a hover tooltip. Keyboard and
    mouse are extras.
@@ -59,6 +62,38 @@ planned for Phase 3). It's built for iPad first.
   `.bigHorde()`, `.strays()`, `.survivor()`, `.supplyDrop()`, `.looters()`, …). The same
   triggers are in the in-game menu under "Sandbox".
 
+## Studio (design agents)
+
+Design thinking is delegated; the main session is the **lead engineer** who builds, measures,
+and relays the owner's words.
+
+- **`colony-cdo`** (Chief Design Officer): `../.claude/agents/colony-cdo.md`, in the workspace
+  root, outside this repo. It runs on Opus at extra-high effort with **persistent memory**
+  (`../.claude/agent-memory/colony-cdo/`: owner taste, verdicts, lessons; the gitignored
+  `.claude/agent-memory/colony-cdo` here is a symlink to it, so runs from either folder share one memory). It can play
+  the dev build in its own browser tab and run short headless sims. It writes only in `docs/`.
+- **The studio's craft lives in `docs/studio/`:**
+  - `handbook.md`: the seven-step method and the toolkit.
+  - `rubric.md`: the quality bar, 16/20 with no zeros.
+  - `brief-template.md`: the brief format.
+  - `ideas.md`: the reservoir of every unbuilt idea.
+  - `references/`: the owner's eleven games, plus a synthesis README.
+  - `briefs/`: the CDO's output.
+
+**The loop:**
+1. **Owner problem → CDO brief.** Pass the owner's words verbatim and name the mode (brief,
+   review, vision audit, or quick take).
+2. **Lead checks the brief** against `rubric.md`. For big features, spawn a *second, fresh* CDO
+   in review mode to attack it adversarially before the owner sees it.
+3. **Owner decides.** Tell the CDO the verdict *and the why* (resume it with SendMessage, or
+   note it for the next run) so it lands in its memory.
+4. **Fold the approved design into `docs/DESIGN.md`,** then build the smallest slice first.
+5. **CDO reviews the build** by playing it against the brief's acceptance criteria. The owner's
+   playtest feedback goes back to step 1.
+
+When the owner shares a game to learn from, file it in `references/` (from `_template.md`) and
+update the README synthesis.
+
 ## Architecture (file map)
 
 **Simulation**
@@ -69,12 +104,12 @@ planned for Phase 3). It's built for iPad first.
 | `world.js` | World object, grid, **multi-cell footprints** (`sizeOf`), spawn/despawn, `spawnItem` (merge and spill, keeps corpse props), **survivor vs zombie cost functions**, reachability labels, reservations, letters, time |
 | `path.js` | A* with a pluggable cost function and rect goals (`touch` = end adjacent to a footprint) |
 | `mapgen.js` | Terrain noise, roads, ruined buildings with loot, wrecked cars, vegetation, starting zombies |
-| `zones.js` | Stockpiles (5 priorities and a filter; corpses excluded by default), grow zones, **shelter zones** |
+| `zones.js` | Stockpiles (5 priorities and a filter; corpses excluded by default; presets such as the **Ammo cache**), grow zones, **shelter zones** |
 | `rooms.js` | **Rooms and roofs**: 4-connected rooms bounded by walls, doors, and rock (not barricades); roles; impressiveness; roof support (6 cells) and collapse; auto-roof targets and roof areas; natural roofs from mining; `tempAt` |
 | `climate.js` | **Seasons and temperature**: outdoor curve plus day/night plus weather; room heat loss and heating; hypothermia and heatstroke (RW formulas); spoilage; frost; `growingSeason`; zombie cold slowdown |
 | `buildings.js` | **Per-building tick hook**: supplies (`supplies(t)`: fuel and ammo slots haulers fill), fuel burn, lit/heat state, heat per room, **self-running machine benches** (press, vat), and **the Din** (running machines pulse `makeNoise` with themselves as the source; `w.din`) |
 | `power.js` | **Power grids**: poles link within 8 squares (Chebyshev) and power things within 6; union-find rebuild on `w.powerDirty`; per-grid supply/demand/battery balance each rare tick; brownouts; machine modes (`t.mode`: on / day / off) |
-| `perimeter.js` | **Secure yard**: flood fill from the map edge over zombie-walkable cells; unreached pockets bounded by something built are `w.secure`. `w.breach` = zombies inside, with a letter |
+| `perimeter.js` | **Secure yard**: flood fill from the map edge over zombie-walkable cells; unreached pockets bounded by something built are `w.secure`. `w.breach` = zombies inside, with a letter. Helpers in `world.js`: `inYard` (a building counts if you can stand next to it from inside), `fencedOut`, `compass` |
 | `pawn.js` | Survivor, zombie, and looter factories; needs; skills; `canFight`, `traitMult` |
 | `mood.js` | Thoughts (situational and memory, stacking), mood drift, break thresholds and rolls, catharsis |
 | `jobs.js` | **Job runner and job drivers** (toils + reserve + failIf): haul, deliver, build, repair, rearm, salvage, mine, cut, sow, bill (any recipe), equip, ammo, guard, shelter, eat, sleep, joy, mental states, leave or steal. Also carrying a downed pawn (`carryingPawn`/`carriedBy`) and `claimBed` |
@@ -105,7 +140,13 @@ planned for Phase 3). It's built for iPad first.
    survivor carries.
 3. Every **20 ticks** each survivor scans for zombies (sight, blocked by walls and doors but not
    barricades; a watchtower adds sight). A sighting interrupts non-combat jobs.
-   `threatResponse`: **cornered → fight**. **Shooters** (a gun with ammo) engage anything they
+   **Inside the secure yard, zombies on the far side of the wire are ignored** (`scanThreat`)
+   unless you can hit them through it: shooters in range, or a blade **hacking through the
+   wire** (2 cells in line across a fence, gate, or barricade; zombies grab back at half odds).
+   `threatResponse`: **cornered → fight**. **Supply** runners only flee zombies that can reach
+   them, and otherwise keep the guns fed (`supplyWork`, emptiest first, ignoring Haul priority).
+   **During a horde the wire is home:** work and items stay inside the yard, and anyone outside
+   heads back in. **Shooters** (a gun with ammo) engage anything they
    can see or reach unless it's within 4 cells and they're outnumbered, and on a watchtower
    they never leave it. **Melee** fighters engage only if they can reach the zombie and aren't
    **outnumbered** (more than 2 zombies per nearby fighter + 1). Anyone else flees to a
@@ -237,5 +278,15 @@ render vat (corpse → biofuel). Components from cars and loot. Headless: one gr
 10 machines on 1000 W + solar; a lone zombie barely dents a fence; the siren pulled zombies from
 40 squares and they wrecked it; 6 corpses → 48 biofuel.
 
-**Next:** balance the Din with real play; `findWork` per-kind indexes (≈ 5 ms per call now);
-Phase 4 (people and the world). Name still undecided.
+**Supply Line slice 1 (done, first pass):** the core direction the owner approved (DESIGN §1,
+`docs/studio/briefs/2026-09-29-vision-one-pager.md`). Fight/Supply/Flee; the wire is home;
+hacking through the wire; 24-round turret magazines refilled at half; the Ammo cache zone;
+visible loads, fill rings, and a dry-turret letter. **Test harness:** `tools/supply-test.js`
+(in the page console: `(await import('/tools/supply-test.js')).compare([11, 12, 13], { count: 12 })`).
+Against 12 hunters, a runner makes 1–3 mid-horde refills (none without one) and the fence holds.
+Against 25 at once, a fence section falls in about 40 minutes whatever you do; wave size is
+slice 1b's job.
+
+**Next:** slice 1b (announced waves, steeper Din, after-wave tally), then "What the dead
+carried" (item depth), then reclaim. `findWork` per-kind indexes (≈ 5 ms per call now). Name
+still undecided.

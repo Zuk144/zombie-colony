@@ -53,7 +53,7 @@ export const THINGS = {
   wall: { kind: 'building', label: 'Wood wall', wallLike: true, blocks: true, hp: 300, cost: { wood: 5 }, work: 135 },
   stoneWall: { kind: 'building', label: 'Stone wall', wallLike: true, blocks: true, hp: 700, cost: { stone: 5 }, work: 300 },
   scrapWall: { kind: 'building', label: 'Scrap wall', wallLike: true, blocks: true, hp: 500, cost: { scrap: 4 }, work: 220 },
-  barricade: { kind: 'building', label: 'Barricade', wallLike: true, seeThrough: true, blocks: true, hp: 260, cost: { wood: 10 }, work: 200 },
+  barricade: { kind: 'building', label: 'Barricade', wallLike: true, seeThrough: true, reachThrough: true, blocks: true, hp: 260, cost: { wood: 10 }, work: 200 },
   door: { kind: 'building', label: 'Door', door: true, hp: 260, cost: { wood: 25 }, work: 500 },
   spikeTrap: { kind: 'building', label: 'Spike trap', trap: { damage: [35, 55] }, hp: 60, cost: { wood: 15 }, work: 250, rearmWork: 150 },
   guardPost: { kind: 'building', label: 'Watchtower', guardPost: true, sightBonus: 7, rangeBonus: 3, hp: 200, cost: { wood: 35 }, work: 700 },
@@ -69,10 +69,10 @@ export const THINGS = {
 
   // ---- Phase 3 "The Hum" ----
   // Fences: see-through, stop zombies; a lone attacker barely dents one (FENCE.loneFactor).
-  fence: { kind: 'building', label: 'Chain-link fence', wallLike: true, fence: true, seeThrough: true, blocks: true, hp: 200, cost: { scrap: 2 }, work: 90 },
-  electricFence: { kind: 'building', label: 'Electric fence', wallLike: true, fence: true, seeThrough: true, blocks: true, hp: 240, cost: { scrap: 3, components: 1 }, work: 160,
+  fence: { kind: 'building', label: 'Chain-link fence', wallLike: true, fence: true, seeThrough: true, reachThrough: true, blocks: true, hp: 200, cost: { scrap: 2 }, work: 90 },
+  electricFence: { kind: 'building', label: 'Electric fence', wallLike: true, fence: true, seeThrough: true, reachThrough: true, blocks: true, hp: 240, cost: { scrap: 3, components: 1 }, work: 160,
     power: { draw: 15 }, electric: { damage: [8, 14], stagger: 150 } },
-  gate: { kind: 'building', label: 'Gate', door: true, gate: true, hp: 200, cost: { scrap: 6 }, work: 200 },
+  gate: { kind: 'building', label: 'Gate', door: true, gate: true, reachThrough: true, hp: 200, cost: { scrap: 6 }, work: 200 },
   // Machines. power.output / power.draw in W, power.storage in Wd; noise = Din pulse radius.
   powerPole: { kind: 'building', label: 'Power pole', pole: true, hp: 60, cost: { wood: 6, scrap: 2 }, work: 120 },
   generator: { kind: 'building', label: 'Fuel generator', machine: true, size: [2, 2], blocks: true, hp: 300, cost: { scrap: 40, components: 4 }, work: 1500,
@@ -85,7 +85,7 @@ export const THINGS = {
     power: { draw: 100 } },
   siren: { kind: 'building', label: 'Siren', machine: true, hp: 120, cost: { scrap: 15, components: 3 }, work: 500, power: { draw: 150 }, noise: 40 },
   autoTurret: { kind: 'building', label: 'Auto-turret', machine: true, blocks: true, hp: 220, cost: { scrap: 30, components: 5 }, work: 1400, power: { draw: 150 },
-    ammoFeed: { capacity: 60 }, turret: { range: 13, damage: [18, 26], cooldown: 70, accuracy: 0.7, noise: 22 } },
+    ammoFeed: { capacity: 24, refillAt: 0.5 }, turret: { range: 13, damage: [18, 26], cooldown: 70, accuracy: 0.7, noise: 22 } },
   ammoPress: { kind: 'building', label: 'Ammo press', machine: true, bench: true, size: [2, 2], blocks: true, hp: 200, cost: { scrap: 35, components: 4 }, work: 1300,
     recipes: ['pressAmmo'], power: { draw: 300 }, noise: 9 },
   renderVat: { kind: 'building', label: 'Render vat', machine: true, bench: true, size: [2, 1], rotatable: true, blocks: true, hp: 180, cost: { scrap: 25, components: 2 }, work: 1000,

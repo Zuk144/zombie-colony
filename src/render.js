@@ -4,7 +4,7 @@
 import { TILE, COMFORT } from './config.js';
 import { THINGS, ROOM_ROLES } from './defs.js';
 import { hourFloat, inBounds, thingsAt, sizeOf, allThings } from './world.js';
-import { isLit, isRunning } from './buildings.js';
+import { isLit, isRunning, supplyFrac } from './buildings.js';
 import { isPowered, wantsPower, modeAllows, netOf } from './power.js';
 import { seasonOf } from './climate.js';
 import { roofWantedAt, unroofWantedAt } from './rooms.js';
@@ -16,6 +16,7 @@ const ZONE_STYLE = {
   stockpile: ['rgba(240, 214, 110, 0.18)', 'rgba(250, 225, 120, 0.75)'],
   grow: ['rgba(150, 236, 110, 0.16)', 'rgba(165, 245, 125, 0.7)'],
   shelter: ['rgba(110, 175, 255, 0.16)', 'rgba(130, 190, 255, 0.8)'],
+  cache: ['rgba(235, 150, 60, 0.2)', 'rgba(245, 165, 70, 0.85)'], // ammo cache stockpile preset
 };
 
 export function createRenderer(canvas, w) {
@@ -102,7 +103,7 @@ export function createRenderer(canvas, w) {
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const zone = w.zoneAt[y * w.w + x];
       if (!zone) continue;
-      const [fill, edge] = ZONE_STYLE[zone.type];
+      const [fill, edge] = ZONE_STYLE[zone.preset ?? zone.type];
       ctx.fillStyle = fill;
       ctx.fillRect(x * T, y * T, T, T);
       ctx.fillStyle = edge;
@@ -148,6 +149,15 @@ export function createRenderer(canvas, w) {
       else if (t.def === 'guardPost') A.drawGuardPost(ctx, t, px, lod);
       else if (THINGS[t.def].machine || THINGS[t.def].pole) A.drawMachine(ctx, t, now, px, lod, ...sizeOf(t), machineState(t));
     }
+    // Fill rings: turrets and generators always (up close), fires only once they're half empty,
+    // and an empty one (red) at every zoom.
+    for (const t of furniture) {
+      const frac = supplyFrac(t);
+      if (frac == null) continue;
+      const d = THINGS[t.def];
+      const show = frac <= 0 || (lod >= 1 && (d.turret || d.power?.output || frac <= 0.5));
+      if (show) A.drawSupplyRing(ctx, t, frac, now, px, ...sizeOf(t));
+    }
     if (walls.length) A.drawWalls(ctx, walls, connects, px, lod);
     for (const t of doors) {
       const horizontal = connects(t.x - 1, t.y) === 'wall' || connects(t.x + 1, t.y) === 'wall';
@@ -182,8 +192,9 @@ export function createRenderer(canvas, w) {
     const standing = visible.filter((p) => !lyingDown(p) && !p.carriedBy).map((p) => ({ p, pos: pawnPos(p) })).sort((a, b) => a.pos.y - b.pos.y);
     for (const { p, pos } of standing) {
       A.drawPerson(ctx, p, pos.x, pos.y, now, w.tick, px, lod, p === sel);
-      // Carried over the shoulder: drawn lying across the carrier.
+      // Carried over the shoulder: drawn lying across the carrier. Loads are held in front.
       if (p.carryingPawn) A.drawLying(ctx, p.carryingPawn.look, pos.x, pos.y - 1, (p.facing ?? 0) + Math.PI / 2, px);
+      else if (p.carrying) A.drawCarried(ctx, p.carrying, pos.x, pos.y, p.facing ?? 0, px, lod);
     }
     drawFx(now);
 
@@ -430,7 +441,7 @@ export function createRenderer(canvas, w) {
     // Tap ripples: instant feedback for touches.
     for (const t of ui.ripples ?? []) {
       const k = (now - t.at) / 350;
-      if (k > 1) continue;
+      if (k < 0 || k > 1) continue; // a ripple stamped by another clock can briefly be in the future
       ctx.strokeStyle = `rgba(255, 255, 255, ${0.8 * (1 - k)})`;
       ctx.lineWidth = 2 * px;
       ctx.beginPath();

@@ -11,9 +11,9 @@ import { findPath } from './path.js';
 import {
   passable, moveCost, isSpawned, spawn, despawn, spawnItem, reserve, releaseAll, reservedByOther,
   tkey, ckey, plantAt, buildingAt, blueprintAt, itemAt, canReach, canReachThing, allThings, dist, letter,
-  randomReachableCell, findEdgeCell, colonists, sizeOf, pawnById, DIRS,
+  randomReachableCell, findEdgeCell, colonists, sizeOf, pawnById, DIRS, inYard, compass,
 } from './world.js';
-import { learn, workSpeed, exposureSlow, REST_GAIN, JOY_GAIN } from './pawn.js';
+import { learn, workSpeed, exposureSlow, REST_GAIN, JOY_GAIN, isRunner } from './pawn.js';
 import { addMemory } from './mood.js';
 import { roomOf, tempAt, isRoofed, applyRoofWork, roofAfterMining } from './rooms.js';
 
@@ -395,7 +395,7 @@ export function roofJob(w, x, y, remove) {
 // Load fuel or ammo into a building (`field`: 'fuel' or 'ammo', see buildings.supplies).
 export function refuelJob(w, item, target, count, field = 'fuel', capacity = THINGS[target.def].fuel.capacity) {
   return {
-    def: 'refuel', kind: 'work', report: field === 'ammo' ? `loading the ${label(target.def)}` : `refueling the ${label(target.def)}`, item, target,
+    def: 'refuel', kind: 'work', report: field === 'ammo' ? `running rounds to the ${compass(w, target)} ${label(target.def)}` : `refueling the ${label(target.def)}`, item, target,
     reserve: [tkey(item), tkey(target)],
     failIf: (w, p, j) => !isSpawned(w, j.target) || (!p.carrying && !isSpawned(w, j.item)),
     toils: [
@@ -407,9 +407,15 @@ export function refuelJob(w, item, target, count, field = 'fuel', capacity = THI
         j.target[field] = (j.target[field] ?? 0) + used;
         p.carrying.count -= used;
         if (p.carrying.count <= 0) p.carrying = null;
+        if (used > 0 && isRunner(p) && w.story?.hordeActive) addMemory(p, 'keptGunsFed');
       }),
     ],
   };
+}
+
+// A horde is on and you're outside the wire: drop it and get back in.
+export function homeJob(w, cell) {
+  return { def: 'goHome', kind: 'work', report: 'heading back inside the wire', cell, toils: [goTo((j) => j.cell, false)] };
 }
 
 // Too cold or too hot: go somewhere comfortable and wait it out.
@@ -524,7 +530,8 @@ export function joyJob(w, p) {
 }
 
 export function wanderJob(w, p, { report = 'wandering', kind = 'idle', radius = 5, ticks = [200, 600] } = {}) {
-  const cell = randomReachableCell(w, p, radius);
+  // The wire is home: someone idling inside the secure yard doesn't drift out through the gate.
+  const cell = randomReachableCell(w, p, radius, inYard(w, p) ? (x, y) => w.secure[y * w.w + x] === 1 : undefined);
   return {
     def: 'wander', kind, report, cell,
     toils: [...(cell ? [goTo((j) => j.cell, false)] : []), wait(() => w.rng.int(...ticks))],

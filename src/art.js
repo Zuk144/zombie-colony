@@ -173,6 +173,24 @@ export function drawItem(ctx, t, px, lod) {
       ctx.fillStyle = '#7fae4a'; circle(ctx, cx + 1.9, cy - 1.3, 1.3);
       ctx.fillStyle = '#e6c25a'; circle(ctx, cx + 1.4, cy + 1.9, 1.1);
       break;
+    case 'ammo': // an olive ammo box with brass showing
+      ctx.fillStyle = '#5d6b3a'; rrect(ctx, cx - 5, cy - 3.2, 10, 7, 1.2); ctx.fill(); outline(ctx, px, '#343d20');
+      ctx.fillStyle = '#48532c'; ctx.fillRect(cx - 5, cy - 3.2, 10, 1.8);
+      ctx.fillStyle = d.color;
+      for (let k = 0; k < 4; k++) circle(ctx, cx - 3 + k * 2, cy + 1, 0.8);
+      break;
+    case 'biofuel': // a jerry can
+      ctx.fillStyle = '#6f8f2e'; rrect(ctx, cx - 3.6, cy - 4, 7.2, 8.6, 1.2); ctx.fill(); outline(ctx, px, '#3c5018');
+      ctx.strokeStyle = '#3c5018'; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(cx - 2.4, cy - 2.6); ctx.lineTo(cx + 2.4, cy + 3); ctx.moveTo(cx + 2.4, cy - 2.6); ctx.lineTo(cx - 2.4, cy + 3); ctx.stroke();
+      ctx.fillStyle = '#c9b24a'; ctx.fillRect(cx + 1.2, cy - 5.4, 1.8, 1.6);
+      break;
+    case 'components': // a salvaged circuit board
+      ctx.fillStyle = '#2f6f63'; rrect(ctx, cx - 4.6, cy - 3.6, 9.2, 7.2, 1); ctx.fill(); outline(ctx, px, '#1c4038');
+      ctx.fillStyle = '#1f2326'; ctx.fillRect(cx - 1.6, cy - 1.6, 3.2, 3.2);
+      ctx.fillStyle = '#d8b25a';
+      for (const [dx, dy] of [[-3.4, -2.4], [-3.4, 2], [3, -2.4], [3, 2]]) circle(ctx, cx + dx, cy + dy, 0.6);
+      break;
     default:
       ctx.fillStyle = d.color; rrect(ctx, cx - 4, cy - 4, 8, 8, 1.5); ctx.fill();
   }
@@ -672,6 +690,44 @@ export function drawBadge(ctx, t, kind, px) {
   else if (kind === 'harvest') { ctx.ellipse(x, y, 1.1, 2, 0.7, 0, TAU); }
   else { ctx.arc(x - 0.6, y - 0.6, 1.1, 0, TAU); ctx.moveTo(x, y); ctx.lineTo(x + 1.7, y + 1.7); }
   ctx.stroke();
+}
+
+// What a survivor is carrying, held in front of them: the item's own sprite at about half size,
+// or a colored dot when zoomed far out (brass = rounds, red = fuel, brown = wood).
+const CARRY_DOT = { ammo: '#d6ad45', biofuel: '#e0573d', wood: '#9a6a3a' };
+export function drawCarried(ctx, carrying, x, y, facing, px, lod) {
+  const hx = x + Math.cos(facing) * T * 0.35, hy = y + Math.sin(facing) * T * 0.35 + 1.5;
+  if (lod === 0) {
+    ctx.fillStyle = CARRY_DOT[carrying.def] ?? '#b9bcc2';
+    circle(ctx, hx, hy, Math.max(1.6, 2.2 * px));
+    return;
+  }
+  const s = 0.55;
+  ctx.save();
+  ctx.translate(hx, hy);
+  ctx.scale(s, s);
+  drawItem(ctx, { id: 0, def: carrying.def, count: 1, x: -0.5, y: -0.5, ...(carrying.props ?? {}) }, px / s, lod);
+  ctx.restore();
+}
+
+// A fill ring around anything haulers keep supplied (turret rounds, generator or stove fuel):
+// green above half, amber below, and a slow red pulse when empty.
+export function drawSupplyRing(ctx, t, frac, now, px, sw = 1, sh = 1) {
+  const cx = (t.x + sw / 2) * T, cy = (t.y + sh / 2) * T;
+  const r = (Math.max(sw, sh) * T) / 2 + 1.8;
+  const lw = Math.max(1.3, 2 * px);
+  ctx.lineCap = 'round';
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = 'rgba(10, 12, 16, 0.3)';
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke();
+  if (frac <= 0) {
+    ctx.strokeStyle = `rgba(239, 91, 75, ${0.55 + 0.45 * Math.sin((now / 1000) * TAU)})`; // 1 Hz pulse
+    ctx.lineWidth = lw * 1.3;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke();
+    return;
+  }
+  ctx.strokeStyle = frac > 0.5 ? '#8fdc6a' : '#f0c14b';
+  ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, frac)); ctx.stroke();
 }
 
 export function drawBar(ctx, x, y, width, frac, color, px) {

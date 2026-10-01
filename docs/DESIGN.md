@@ -1,63 +1,150 @@
 # Design doc (untitled; "Holdout" is only a placeholder label)
 
-> **A touch-first colony sim about keeping a handful of survivors alive, and sane, through the
-> zombie apocalypse. You plan; they live it.**
+> **A touch-first colony sim where your fortress runs on people: someone carries every bullet,
+> and the dead you kill pay for the next ones. You plan; they live it.**
 
 The engine and systems thinking come from RimWorld (see `RESEARCH.md`). The world, the threat,
 and the feel are our own: post-apocalyptic, zombie-driven, readable, and made for a tablet.
+
+The vision was approved by the owner on 2026-09-29. The full reasoning is in
+`studio/briefs/2026-09-29-vision-one-pager.md`.
 
 ---
 
 ## 1. Pillars
 
-Every feature should serve at least one of these. If it fights one, it needs a very good reason.
+**The heart: the base is the body, and the people are the blood.** Building is the half you can
+see. The core fun is the test the building exists to pass:
+- **A fortress problem is solved by a person going somewhere dangerous.** When the east gun runs
+  dry, somebody runs it a crate.
+- **A people problem shows up as a fortress problem.** A bitten runner is a gun that goes quiet.
 
-1. **Plan, don't puppet.** You never steer a survivor. You shape the world they decide in:
-   walls, zones, priorities, schedules, machines. The drama lives in the gap between your plan
-   and what tired, scared, bitten people actually do.
-2. **The dead are a tide, not a raid.** Zombies are constant environmental pressure. There are
-   always a few shambling around, they're drawn by **noise** and **sight**, they're worse at
-   **night**, and they build into **hordes**. They don't take cover or reason; they push on the
-   weakest point of your walls.
-3. **Every system tells a story.** The Director paces events. Needs, mood, and mental breaks
-   make survivors crack. Bites mean infection and a countdown. The dead come back. None of it
-   is scripted; stories emerge from systems colliding.
-4. **Build a machine that keeps you alive.** In the Factorio layer, belts and machines free up
-   scarce survivors for the jobs only people can do. But machines need power and fuel, break
-   down, and make noise, and noise brings the dead.
-5. **Touch-native and readable at any zoom.** Built for fingers first: big targets, clear
-   modes, gestures that feel like a maps app. Clean vector art, so it's crisp zoomed all the
-   way in on an iPad Pro and readable zoomed all the way out.
+Every feature should serve at least one pillar. Each pillar comes with a test that a feature can
+fail. A feature that fights a pillar needs a very good reason.
+
+| Pillar | What it means | A feature fails it if… | Pulls against |
+|---|---|---|---|
+| **1. The base runs on people.** | Guns, machines, and fires work only while survivors walk supplies to them. You fix shortages with layout and policy, never with orders. The drama lives in the gap between your plan and what tired, scared, bitten people actually do. | A machine runs without anyone ever walking to it, or a tool tells a named survivor to do a named thing. | 2: more people and machines means more noise. |
+| **2. Noise is the dial.** | Every machine, gunshot, and generator has a volume. Louder brings more of the dead all the time, bigger waves, and more to harvest. | A new source of income costs no noise and no risk, or the player can't see a noise cost before choosing it. | 3: the harvest pays best when you're loudest. |
+| **3. Everything the dead carried is worth something.** | Items come from bodies, buildings, and cars, and each has more than one use. Your own dead come back carrying their things. | An item has only one use, or it comes from nowhere in this world (a research unlock, a shop). | 1: collecting means sending people past the wire. |
+
+**Non-negotiables** (constraints, not pillars):
+- **Indirect control:** you never steer a survivor.
+- **Touch first:** big targets, clear modes, and gestures that feel like a maps app.
+- **Vector only:** everything drawn from code.
+- **Readable at any zoom:** crisp zoomed all the way in on an iPad Pro, and readable zoomed all
+  the way out.
+
+### Anti-pillars: what we are not
+
+- **Not a tower defense:** no fixed waves, no upgrade shop, and no lanes drawn for you.
+- **Not a factory:** no belts or inserters, and no ratio math. About ten machines.
+- **Not a puppet show:** no drafting, no "go here", and no crew posted to a specific gun.
+- **Not a drama you only watch:** no scripted plots. Stories come from systems colliding: the
+  Director paces events, mood breaks people, bites start a countdown, and the dead come back.
+- **Not a loot treadmill:** no rarity colors or gear scores. Items are things with uses, not
+  numbers going up.
+- **Not an army:** a colony peaks at around 10–15 people you know by name. Growth is earned, and
+  sustainability is the cap.
 
 ## 2. What we take from each influence
 
 | Game | We take | We leave |
 |---|---|---|
-| **RimWorld** | Indirect control; work priority grid; needs → mood → mental breaks; blueprints → hauling → building; stockpiles; bills; storyteller pacing; traits and skills | Drafting (direct combat control), sci-fi lore |
+| **RimWorld** | Indirect control; work priority grid; needs → mood → mental breaks; blueprints → hauling → building; stockpiles; bills; storyteller pacing; traits and skills; deep, useful items (re-sourced from the dead and the town, not RimWorld's list) | Drafting (direct combat control), sci-fi lore |
 | **Project Zomboid** | Noise and sight attract zombies; night is dangerous; scavenging ruins and wrecks; barricades; bites → infection | First-person survival micro, a single character |
 | **The Walking Dead** | Survivors as people with bonds; **everyone who dies turns** unless you deal with the body; other humans as a second threat; hard choices in events | Main-character plot armor |
 | **Prison Architect** | Clean top-down vector look; drawing rooms and zones on a grid; regimes and schedules; the planner's-eye camera | Management-sim distance from the people |
-| **Factorio** | Belts, arms (inserters), machines, and power; production chains; throughput thinking; automated defense fed by supply lines | Scale-for-scale's-sake megabases, and combat as the reason to automate at all |
+| **Factorio** | Machines and power; your output feeds your enemy (pollution → the Din); turrets that must be fed; status readable at a glance | Belts and inserters, ratio math, and scale for its own sake |
+| **Cosmoteer** | People are the logistics, visible and fixed by layout; design, test, redesign | Piloting, and crew posted to stations |
+| **They Are Billions** | Announced waves with a direction and a countdown; clearing pays twice; the finale is everything left alive | Unit command, and one leak ending a run |
 
 ## 3. The loops
 
-- **Moment to moment (seconds):** notice something (an alert, an idle survivor, a zombie at
-  the fence), respond with a *plan* (designate, build, re-prioritize), then watch it play out.
+```
+build and scavenge ──► the TRICKLE tests your routine (guards, turrets, runners)
+      ▲                    costs ammo and repairs, pays in drops
+      │                                  │
+      │                    a WAVE is announced (direction, size, countdown)
+      │                                  │
+  louder, richer          prepare: stock caches, top up guns, pull in, pick your noise
+      ▲                                  │
+      │                    the wave hits: runners feed the line, fighters hold the wire
+      │                                  │
+      └──── the MORNING AFTER: salvage what the dead carried, repair, redesign
+```
+
+**The threat rhythm is a sawtooth, not a horde every night:**
+- **Always:** the dead trickle in, more at night. The Din sets how many. The trickle tests your
+  routine, and it's your upkeep and your income at once.
+- **Every few days:** a wave, announced about half a day ahead with its direction, size, and a
+  countdown. Its size comes from your average noise since the last wave, and it locks when
+  announced. The wave tests your design.
+- **After:** salvage, repair, redesign. The trickle comes back a little stronger.
+
+**Guard duty is a cost, not a click.** You set a guard shift and place posts, and your noise
+decides how many guards you need. Posts need ammo and light, and runners bring them.
+
+**At each timescale:**
+- **Moment to moment (seconds):** notice something (a fill ring draining, a runner crossing the
+  yard, a zombie at the fence). Respond with a *plan*: designate, build, re-prioritize, or move a
+  cache. Then watch it play out.
 - **Daily (≈17 real minutes at 1×):** daylight is for scavenging ruins, farming, and building.
-  Dusk is for pulling in and closing the doors. **Night** means more zombies, sight is short,
-  and light and noise carry.
-- **Arc (weeks):** hordes scale with your wealth, your noise, and time. You grow from a
-  campfire in a clearing to a walled compound with farms, a workshop, and a humming,
-  belt-fed defense line. The better you do, the harder the Director pushes.
+  Guard shifts hold the trickle, which is heavier at night, when sight is short and light and
+  noise carry.
+- **Wave (every 4–7 days):** announcement, preparation, the stand, and the morning after.
+- **Arc (weeks):** the trickle and the waves scale with your noise, your wealth, and time. You
+  grow from a campfire in a clearing to a walled compound with farms, a workshop, and a humming
+  defense line fed by runners. The line pushes outward into reclaimed districts, and the run ends
+  at the radio-tower siege.
+
+**What the player should feel, in priority order (MDA):**
+1. **Challenge:** the wave tests your design. This is the core fun.
+2. **Narrative:** the people make it a story. The owner has said it can sit second or third,
+   behind the challenge.
+3. **Discovery:** what the dead carried, and what the town held.
+4. **Expression:** your compound, your lanes, your caches.
+5. **Sensation:** loads moving and guns barking, in clean vector.
+6. **Fantasy:** leading survivors through the end.
+7. **Submission:** the calm routine of the trickle.
+
+Fellowship is out of scope.
+
+**Where item depth lives:**
+- **The dead keep what they had,** and they dress for what they carry: police blue means rounds,
+  scrubs mean medicine, and overalls mean tools.
+- **Each district holds its own goods.**
+- **Every item has a source you can point to and at least two uses.**
+- **Luxuries are mood levers.**
+- **Your own dead drop their own gear.**
+
+The details are the next brief, "What the dead carried".
 
 ## 4. Indirect defense: how you fight without controlling anyone
 
 This is the key design problem: zombies attack, and the player can't draft. The answer is
 **defense by design + policy**:
 
-- **Response policy** per survivor (Work tab column): **Fight** or **Flee**. Fighters engage
-  zombies they can see and reach. Fleers run to a **Shelter zone** (or away from the threat).
-  Badly hurt fighters flee automatically. "Gentle" survivors can never fight.
+- **Response policy** per survivor (Work tab column): **Fight**, **Supply**, or **Flee**.
+  - **Fighters** engage zombies they can see and reach.
+  - **Supply** survivors keep the guns fed and the generator running during an attack, and back
+    off only from a zombie that can actually reach them.
+  - **Fleers** run to a **Shelter zone** (or away from the threat).
+  - Badly hurt fighters flee automatically. "Gentle" survivors can never fight, but they can be
+    runners.
+  - *(Supply was approved 2026-09-29 and is being built in the Supply Line slice 1; see
+    `studio/briefs/2026-09-29-supply-line-slice.md`.)*
+- **The wire is home.** Inside the secure yard, idle survivors stay inside it, and fighters don't
+  go out through the gate to fight.
+- **Hacking through the wire** (the owner's idea, approved 2026-09-29):
+  - Fighters with a melee weapon go to the fence line when the dead arrive, and hack at zombies
+    through chain-link, gates, and barricades. It's quiet, so it thins the horde without feeding
+    the Din.
+  - It isn't free. The dead grab back through the wire (at half their open-melee hit rate, with
+    the same bite chance). The hacker is bait: the crowd gathers at their section, and 3 or more
+    tear it down.
+  - You can't reach through a powered electric fence. Switch that line Off to make it a hack line.
+  - The full spec is the slice brief's addendum.
 - **Walls and doors are the real weapon.** Zombies can't open doors. They **bash** through
   whatever route is cheapest (walls and doors have HP), so layout matters: layered walls,
   chokepoints, doors on the far side. Survivors repair damage between attacks.
@@ -65,12 +152,17 @@ This is the key design problem: zombies attack, and the player can't draft. The 
   safe at range but loud, and a gunshot pulls every zombie within earshot.
 - **Later levers, still indirect:** guard posts and a "guard" schedule slot for night watch; an
   alarm bell that switches the whole colony to its threat policy; traps, spike walls, and
-  electric fences; turrets fed by ammo belts; floodlights (light draws zombies but lets you
+  electric fences; turrets fed by runners; floodlights (light draws zombies but lets you
   see them).
 - **No drafting.** At most a "rally flag" someday: a place fighters *prefer* to hold, never a
   unit command.
 
 ## 5. Zombies
+
+**The dead are a tide, not a raid.** Zombies are constant environmental pressure. There are
+always a few shambling around, they're drawn by **noise** and **sight**, they're worse at
+**night**, and they build into **hordes**. They don't take cover or reason; they push on the
+weakest point of your walls.
 
 - **Senses:** sight (cone-free radius, blocked by walls and closed doors) and hearing (noise
   events with a radius). They smell survivors within a couple of cells.
@@ -120,6 +212,30 @@ Survivor-specific additions:
   **salvaged** for scrap metal.
 - Future: expeditions to off-map locations (like Walking Dead supply runs or RimWorld
   caravans) for rare loot, survivors, and stories.
+
+### The resource loop: "the dead are the mine, the town is the frontier"
+
+**The problem (owner playtest, after Phase 3):** almost everything on the map is a one-time
+deposit. Trees never regrow, scrap and components come only from finite ruins and cars, and
+stone from finite rock. By about day 20 the map is stripped and there's no reason to build
+bigger. Approved direction, in build order:
+
+1. **A renewable floor.** Survivors can plant tree plots, and wild trees slowly re-seed near
+   other trees. Not exciting, but running out of wood forever feels bad.
+2. **The horde is the harvest.** Zombies were people and carry things: scrap, cloth, ammo,
+   and sometimes medicine or components. With the render vat's biofuel, every kill pays. This
+   turns the Din into a dial the player controls: quiet when weak, loud when you want
+   resources. A siren kill zone becomes a farm; you ring the dinner bell on purpose.
+3. **Reclaim the town.** The map holds named districts (pharmacy, police station, hardware
+   store, gas station), each infested, with its loot locked behind clearing it. Clear and fence
+   one and it becomes territory with a lasting perk (medicine, guns, components, fuel).
+   Building bigger literally means pushing the fence outward; more territory means a longer
+   perimeter to hold.
+4. **Runs beyond the map** (Phase 4): send a team off-map for days to places on a world map.
+   Near places run dry, so you go farther. Teams come back with loot, strangers, or bites.
+5. **A long goal:** a radio tower built in stages that needs parts from every district type.
+   Each stage is louder and draws bigger hordes; the broadcast brings survivors, and finishing
+   it triggers a final siege. The arc of a whole game.
 
 ## 9. Phase 3: "The Hum" (machines, fences, and noise)
 
@@ -282,8 +398,17 @@ modes (Always / Day only / Off); Machines dock tray, machine inspector, yard and
 and a layers button that cycles Rooms → Yard → Power. See §9. Still open: balance passes on the
 Din and horde scaling with real play, and the "later" machines in §9.
 
+**Supply Line, slice 1 (done, first pass):** the Supply response, "the wire is home", hacking
+through the wire, 24-round magazines with a refill point, the Ammo cache zone, visible loads,
+fill rings, and the dry-turret letter (`docs/studio/briefs/2026-09-29-supply-line-slice.md`).
+
+**Supply Line, slice 1b (next):** announced waves with a size lock and a countdown chip, a
+steeper Din, and the after-wave tally. Then the **"What the dead carried"** brief (item depth,
+drops outside the wire, the dawn salvage), then **reclaim** (districts and territory, §8).
+
 **Phase 4: people and the world**
-Relationships, human factions, choice events, expeditions, and more zombie types.
+Relationships, human factions, choice events, expeditions (§8 item 4), the radio tower (§8
+item 5), and more zombie types.
 
 **Phase 5: ship it**
 Tutorial, settings, Director presets, audio, and PWA/Capacitor packaging.
@@ -295,6 +420,22 @@ Tutorial, settings, Director presets, audio, and PWA/Capacitor packaging.
   turns.
 - Automation is **a handful of machines** (§9).
 - **Web app now, App Store later** (§11).
+- The resource loop is **"the dead are the mine, the town is the frontier"** (§8).
+- **The core direction is the Supply Line** (2026-09-29): the base is the body, and the people
+  are the blood (§1). The hook, three pillars, and anti-pillars are approved as written in
+  `studio/briefs/2026-09-29-vision-one-pager.md`.
+- **The threat rhythm is a noise-driven trickle plus announced waves,** not a horde every night
+  (§3). A wave's size locks when it's announced.
+- **The aesthetic priority is Challenge first.** Story ranks second or third (§3).
+- **A colony peaks at 10–15,** capped by sustainability, not by a hard number.
+- **Drops are worth going loud for,** and item depth is core. It's sourced from what the dead
+  carried and what the town held (§3; the next brief is "What the dead carried").
+- **Supply response and hacking through the wire:**
+  - Supply is a third Response.
+  - Gentle survivors can be runners.
+  - The wire is home: fighters don't go out through the gate.
+  - Melee fighters can hack through the wire (§4).
+  - Waves come with a 12-hour warning, and the day-3 pack is the first announced wave.
 
 **Still open:**
 1. **Name.** Undecided. "Holdout" is just the working label in code and UI.

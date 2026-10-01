@@ -34,6 +34,7 @@ const P = {
   moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
   sword: '<path d="M14.5 4H20v5.5L9 20.5 3.5 15z"/><path d="M5.5 13l5.5 5.5M3 21l2.5-2.5"/>',
   run: '<circle cx="14" cy="4.5" r="2"/><path d="M5 20l4-5 3 2 2-5 4 3M9 9l3-2 4 1"/>',
+  crate: '<rect x="3.5" y="7" width="17" height="12" rx="1.2"/><path d="M3.5 11h17M9 7v4M15 7v4M7 15h3"/><path d="M8 7l1.5-3h5L16 7"/>',
   target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>',
   barricade: '<path d="M3 8h18M3 16h18M5 5v14M19 5v14M5 8l14 8M19 8L5 16"/>',
   spikeTrap: '<rect x="3" y="14" width="18" height="6" rx="1"/><path d="M6 14l2-9 2 9M11 14l2-9 2 9M16 14l1.5-7 1.5 7"/>',

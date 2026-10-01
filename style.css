@@ -165,6 +165,7 @@ ul.skills li span:first-child { text-transform: capitalize; }
 .resp { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; font-weight: 600; }
 .resp.fight { color: #ffcf7a; }
 .resp.flee { color: #9ed0ff; }
+.resp.supply { color: #e8c07a; }
 .bill { padding: 8px 10px; margin: 6px 0; background: rgba(255,255,255,0.05); border-radius: 10px; display: grid; gap: 6px; }
 .bill.paused { opacity: 0.55; }
 .bill-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }

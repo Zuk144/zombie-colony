@@ -7,10 +7,17 @@ import { idx, inBounds, passable, terrainAt, itemAt, reachGroup, reservedByOther
 export const STOCK_PRIORITIES = ['Low', 'Normal', 'Preferred', 'Important', 'Critical']; // index + 1
 const ITEM_DEFS = Object.keys(THINGS).filter((k) => THINGS[k].kind === 'item');
 
-function createZone(w, type) {
-  const n = ++w.zoneCounter[type];
+// Stockpile presets. An ammo cache is a small, top-priority stockpile for rounds and fuel near
+// the guns: haulers fill it in quiet times, runners grab from it in a fight.
+const PRESETS = {
+  cache: (n) => ({ label: `Ammo cache ${n}`, priority: 5, allow: new Set(['ammo', 'biofuel']) }),
+};
+
+function createZone(w, type, preset = null) {
+  const n = preset ? (w.zoneCounter[preset] = (w.zoneCounter[preset] ?? 0) + 1) : ++w.zoneCounter[type];
   const z = { id: w.nextId++, type, cells: new Set() };
-  if (type === 'stockpile') Object.assign(z, { label: `Stockpile ${n}`, priority: 2, allow: new Set(ITEM_DEFS.filter((k) => !THINGS[k].corpse)) });
+  if (preset) Object.assign(z, { preset }, PRESETS[preset](n));
+  else if (type === 'stockpile') Object.assign(z, { label: `Stockpile ${n}`, priority: 2, allow: new Set(ITEM_DEFS.filter((k) => !THINGS[k].corpse)) });
   else if (type === 'grow') Object.assign(z, { label: `Growing zone ${n}`, crop: 'riceCrop' });
   else Object.assign(z, { label: `Shelter ${n}` });
   w.zones.push(z);
@@ -24,17 +31,17 @@ function zoneable(w, type, x, y) {
   return type !== 'grow' || terr.fertility >= 0.5;
 }
 
-export function addZoneCells(w, type, cells) {
+export function addZoneCells(w, type, cells, preset = null) {
   const valid = cells.filter(([x, y]) => zoneable(w, type, x, y));
   if (!valid.length) return null;
   let zone = null;
   outer: for (const [x, y] of valid) {
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const z = inBounds(w, x + dx, y + dy) && w.zoneAt[idx(w, x + dx, y + dy)];
-      if (z && z.type === type) { zone = z; break outer; }
+      if (z && z.type === type && (z.preset ?? null) === preset) { zone = z; break outer; }
     }
   }
-  zone ??= createZone(w, type);
+  zone ??= createZone(w, type, preset);
   for (const [x, y] of valid) {
     zone.cells.add(idx(w, x, y));
     w.zoneAt[idx(w, x, y)] = zone;

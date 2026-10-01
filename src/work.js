@@ -6,19 +6,24 @@
 
 import { CARRY_CAPACITY } from './config.js';
 import { THINGS, RECIPES, WORK_TYPES, ingKey, ingMatches } from './defs.js';
-import { allThings, canReach, canReachThing, reservedByOther, tkey, ckey, dist, countOwned, plantAt, buildingAt, blueprintAt, itemAt, colonists } from './world.js';
+import { allThings, canReach, canReachThing, reservedByOther, tkey, ckey, dist, countOwned, plantAt, buildingAt, blueprintAt, itemAt, colonists, inYard } from './world.js';
 import { findStorageCell } from './zones.js';
 import { haulJob, deliverJob, buildJob, repairJob, rearmJob, salvageJob, mineJob, cutJob, sowJob, billJob, roofJob, refuelJob } from './jobs.js';
 import { needsTending, rescueJob, tendJob, bestMedicine, pkey } from './medical.js';
 import { roofTargets } from './rooms.js';
-import { hasFuel, needsSupply, supplies } from './buildings.js';
+import { hasFuel, needsSupply, supplies, supplyFrac } from './buildings.js';
 import { growingSeason } from './climate.js';
 
 const free = (w, p, t) => !reservedByOther(w, tkey(t), p) && canReachThing(w, p, t);
 
+// The wire is home: while a horde is on, anyone inside the secure yard only takes work (and
+// fetches items) inside it.
+const lockedIn = (w, p) => !!w.story?.hordeActive && inYard(w, p);
+
 // Nearest usable item; `urgency(t)` (in cells) lets important items jump the queue.
 function nearestItem(w, p, pred, urgency = () => 0) {
-  return allThings(w, (t, d) => d.kind === 'item' && pred(t, d))
+  const locked = lockedIn(w, p);
+  return allThings(w, (t, d) => d.kind === 'item' && pred(t, d) && (!locked || inYard(w, t)))
     .sort((a, b) => dist(p, a) - urgency(a) - (dist(p, b) - urgency(b)))
     .find((t) => free(w, p, t)) ?? null;
 }
@@ -42,7 +47,7 @@ function refuel(w, p, t, slot = supplies(t)[0]) {
   const room = Math.floor(slot.capacity - (t[slot.field] ?? 0));
   if (room <= 0) return null;
   for (const def of slot.items) {
-    const item = nearestItem(w, p, (it) => it.def === def && !zombieNear(w, it));
+    const item = nearestItem(w, p, (it) => it.def === def && !threatNear(w, it));
     if (item) return refuelJob(w, item, t, Math.min(room, CARRY_CAPACITY), slot.field, slot.capacity);
   }
   return null;
@@ -50,6 +55,29 @@ function refuel(w, p, t, slot = supplies(t)[0]) {
 
 // Don't send people out to patch a wall (or grab a body) while zombies are right there.
 const zombieNear = (w, t, r = 3) => w.pawns.some((z) => z.faction === 'zombie' && dist(z, t) <= r);
+// Supply runs are braver: inside the yard, only zombies that are also inside count. The dead
+// pressing on the wire are the whole reason the gun needs feeding.
+const threatNear = (w, t, r = 3) => {
+  const yard = inYard(w, t);
+  return w.pawns.some((z) => z.faction === 'zombie' && dist(z, t) <= r && (!yard || inYard(w, z)));
+};
+
+// Supply response (combat.js / think.js): when the dead come, runners drop everything but this.
+// Emptiest gun or generator first, then nearest; ignores the Haul priority.
+export function supplyWork(w, p) {
+  if (p.incapable.has('hauling')) return null;
+  const urgent = emergencyWork(w, p, true);
+  if (urgent) return urgent;
+  const locked = lockedIn(w, p);
+  const targets = allThings(w, (t) => needsSupply(t) && (!locked || inYard(w, t)))
+    .sort((a, b) => supplyFrac(a) - supplyFrac(b) || dist(p, a) - dist(p, b));
+  for (const t of targets) {
+    if (!free(w, p, t) || threatNear(w, t)) continue;
+    const job = refuel(w, p, t, needsSupply(t));
+    if (job) return job;
+  }
+  return null;
+}
 
 // One giver per work type that handles every bench bill of that type: stock the ingredients,
 // then do the work. Bodies bound to rise again get hauled to the burn pit first.
@@ -160,7 +188,7 @@ export const GIVERS = {
     billGiver('machine'), // keep the ammo press and render vat stocked
     {
       targets: (w) => allThings(w, (t) => needsSupply(t)),
-      job: (w, p, t) => (free(w, p, t) && !zombieNear(w, t) ? refuel(w, p, t, needsSupply(t)) : null),
+      job: (w, p, t) => (free(w, p, t) && !threatNear(w, t) ? refuel(w, p, t, needsSupply(t)) : null),
     },
     {
       targets: (w) => allThings(w, (t, d) => d.kind === 'item'),
@@ -175,8 +203,8 @@ export const GIVERS = {
 
 // Emergency work (RW has the same idea): a body that's about to rise gets carried to a burn
 // pit before anything else, by anyone who hauls.
-function emergencyWork(w, p) {
-  if (!(p.priorities.hauling > 0) || p.incapable.has('hauling')) return null;
+function emergencyWork(w, p, anyPriority = false) {
+  if ((!anyPriority && !(p.priorities.hauling > 0)) || p.incapable.has('hauling')) return null;
   const risers = allThings(w, (t, d) => d.corpse && t.reanimateAt && !zombieNear(w, t));
   if (!risers.length) return null;
   const pit = allThings(w, (t, d) => d.bench && t.bills.some((b) => !b.paused && RECIPES[b.recipe].ingredients.some((i) => i.def === 'corpse')))
@@ -188,6 +216,7 @@ function emergencyWork(w, p) {
 export function findWork(w, p) {
   const urgent = emergencyWork(w, p);
   if (urgent) return urgent;
+  const locked = lockedIn(w, p);
   for (let prio = 1; prio <= 4; prio++) {
     for (const wt of WORK_TYPES) {
       if (p.priorities[wt.key] !== prio || p.incapable.has(wt.key)) continue;
@@ -195,6 +224,7 @@ export function findWork(w, p) {
       for (const giver of GIVERS[wt.key]) {
         const cands = giver.targets(w, p).map((t) => ({ t, d: dist(p, t) })).sort((a, b) => a.d - b.d);
         for (const { t, d } of cands) {
+          if (locked && !inYard(w, t)) continue;
           if (d >= bestD) break;
           const job = giver.job(w, p, t);
           if (job) { best = job; bestD = d; break; }

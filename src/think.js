@@ -3,14 +3,14 @@
 // place their behavior comes from.
 
 import { THINGS } from './defs.js';
-import { hourOf, allThings, reservedByOther, tkey, ckey, colonists, letter, dist, canReachThing, canReach } from './world.js';
-import { FOOD_HUNGRY, FOOD_URGENT, REST_DROWSY, REST_EXHAUSTED, JOY_LOW, canFight, isGentle } from './pawn.js';
+import { hourOf, allThings, reservedByOther, tkey, ckey, colonists, letter, dist, canReachThing, canReach, inYard, buildingAt } from './world.js';
+import { FOOD_HUNGRY, FOOD_URGENT, REST_DROWSY, REST_EXHAUSTED, JOY_LOW, canFight, isGentle, isRunner } from './pawn.js';
 import { addMemory } from './mood.js';
-import { findWork } from './work.js';
-import { threatResponse, weaponOf } from './combat.js';
+import { findWork, supplyWork } from './work.js';
+import { threatResponse, weaponOf, canShoot, wireJob } from './combat.js';
 import { needsTending, patientJob } from './medical.js';
 import { comfortableRooms } from './climate.js';
-import { findFood, eatJob, sleepJob, joyJob, wanderJob, tantrumJob, leaveMapJob, stealJob, equipJob, ammoJob, guardJob, shelterJob, warmUpJob } from './jobs.js';
+import { findFood, eatJob, sleepJob, joyJob, wanderJob, tantrumJob, leaveMapJob, stealJob, equipJob, ammoJob, guardJob, shelterJob, warmUpJob, homeJob } from './jobs.js';
 
 const eat = (w, p) => { const f = findFood(w, p); return f && eatJob(w, p, f); };
 
@@ -23,9 +23,11 @@ export function think(w, p) {
   const slot = p.schedule[hourOf(w.tick)];
   const { food, rest, joy } = p.needs;
   return (
+    (outsideDuringHorde(w, p) && goHome(w, p)) ||
     (food < FOOD_URGENT && eat(w, p)) ||
     (rest < REST_EXHAUSTED && sleepJob(w, p)) ||
     comfortJob(w, p) ||
+    (isRunner(p) && (w.story?.hordeActive || w.alarm || p.threat) && supplyWork(w, p)) ||
     (w.alarm && alarmJob(w, p)) ||
     (needsTending(w, p) && patientJob(w, p)) ||
     (slot === 'guard' && canFight(p) && postJob(w, p)) ||
@@ -54,7 +56,25 @@ export function shouldInterrupt(w, p) {
   if (j.kind === 'guard') return !w.alarm && slot !== 'guard'; // shift over
   if (slot === 'sleep' && rest < 0.95 && !w.alarm) return true;
   if (slot === 'guard' && canFight(p) && freePost(w, p)) return true;
+  if (j.def !== 'goHome' && outsideDuringHorde(w, p)) return true; // the wire is home
   return false;
+}
+
+// ---- The wire is home ----------------------------------------------------------
+
+const outsideDuringHorde = (w, p) => !!w.story?.hordeActive && w.secureCount > 0 && !inYard(w, p);
+
+// The nearest open cell inside the secure yard you can walk to.
+function goHome(w, p) {
+  const cells = [];
+  for (let i = 0; i < w.secure.length; i++) {
+    if (!w.secure[i]) continue;
+    const c = { x: i % w.w, y: (i / w.w) | 0 };
+    if (!buildingAt(w, c.x, c.y)) cells.push({ c, d: dist(p, c) });
+  }
+  cells.sort((a, b) => a.d - b.d);
+  const home = cells.slice(0, 40).find(({ c }) => canReach(w, p, c.x, c.y, false));
+  return home ? homeJob(w, home.c) : null;
 }
 
 // ---- Alarm, guard duty, arming ------------------------------------------------
@@ -69,9 +89,10 @@ function postJob(w, p) {
   return post && guardJob(w, post);
 }
 
-// Alarm: fighters man the watchtowers; everyone else waits in a Shelter zone.
+// Alarm: shooters man the watchtowers, blades hold the wire, runners keep the guns fed (think()
+// tried that first), and everyone else waits in a Shelter zone.
 function alarmJob(w, p) {
-  if (canFight(p)) return postJob(w, p);
+  if (canFight(p)) return canShoot(p) ? postJob(w, p) || wireJob(w, p) : wireJob(w, p) || postJob(w, p); // guns up the towers, blades to the wire
   for (const z of w.zones) {
     if (z.type !== 'shelter') continue;
     for (const i of z.cells) {

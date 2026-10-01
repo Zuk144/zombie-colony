@@ -3,11 +3,11 @@
 import { RARE_TICK, STORY_INTERVAL, TICKS_PER_DAY, THREAT_SCAN, FIELD_INTERVAL } from './config.js';
 import { THINGS, TERRAIN } from './defs.js';
 import { createWorld, spawnItem, colonyWealth, letter, idx } from './world.js';
-import { makeColonist, tickNeeds } from './pawn.js';
+import { makeColonist, tickNeeds, isRunner } from './pawn.js';
 import { tickMood } from './mood.js';
 import { startJob, tickJob, endJob, FAIL } from './jobs.js';
 import { think, shouldInterrupt } from './think.js';
-import { tickZombie, updateZombieField, scanThreat, tickCorpses } from './combat.js';
+import { tickZombie, updateZombieField, scanThreat, tickCorpses, runnerDanger } from './combat.js';
 import { tickHealth } from './medical.js';
 import { tickClimate, tickExposure, tickRot, tickFrost, outdoorTemp, plantGrowthFactor } from './climate.js';
 import { tickBuildings } from './buildings.js';
@@ -70,7 +70,9 @@ function tickPawn(w, p) {
   if (p.attackCd > 0) p.attackCd--;
   if (p.faction === 'colony' && (w.tick + p.id) % THREAT_SCAN === 0) {
     p.threat = scanThreat(w, p);
-    const busy = p.job && (p.job.kind === 'combat' || p.job.kind === 'mental');
+    // A Supply runner mid-delivery keeps going unless the dead can actually reach them.
+    const running = p.job?.def === 'refuel' && isRunner(p) && !runnerDanger(w, p);
+    const busy = p.job && (p.job.kind === 'combat' || p.job.kind === 'mental' || running);
     if (p.threat && !p.downed && p.job && !busy) p.interrupt = true;
   }
   if (p.interrupt) {

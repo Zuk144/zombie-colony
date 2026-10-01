@@ -5,16 +5,16 @@
 // a multi-source Dijkstra outward from every survivor, where walls and doors cost "bash time"
 // proportional to their HP. Each zombie just steps downhill; if downhill is a wall, it bashes.
 
-import { TICKS_PER_DAY, SURVIVOR, ZOMBIE, REANIMATE_DAYS, ZOMBIE_CORPSE_ROT_DAYS, MOVE_CELLS_PER_TICK, THREAT_SCAN, MEDICAL, FENCE } from './config.js';
+import { TICKS_PER_DAY, SURVIVOR, ZOMBIE, REANIMATE_DAYS, ZOMBIE_CORPSE_ROT_DAYS, MOVE_CELLS_PER_TICK, THREAT_SCAN, MEDICAL, FENCE, WIRE } from './config.js';
 import { THINGS } from './defs.js';
 import { findPath, Heap } from './path.js';
 import {
   idx, inBounds, DIRS, blocksSight, zombieCost, bashTargetAt, spawnItem, despawn, colonists, letter, dist,
-  allThings, canReach, randomReachableCell, moveCost, isNight, reservedByOther, ckey, thingsAt, sizeOf,
+  allThings, canReach, randomReachableCell, moveCost, isNight, reservedByOther, ckey, thingsAt, sizeOf, inYard, fencedOut, compass, buildingAt, passable,
 } from './world.js';
-import { isPowered } from './power.js';
+import { isPowered, modeAllows } from './power.js';
 import { isRunning, isLit, litByFloodlight } from './buildings.js';
-import { makeZombie, traitMult, canFight, isGentle, learn } from './pawn.js';
+import { makeZombie, traitMult, canFight, isGentle, isRunner, learn } from './pawn.js';
 import { addMemory } from './mood.js';
 import { endJob, removePawn, dropCarried, stepMove, face, goTo, wait, DONE, FAIL } from './jobs.js';
 import { tempAt } from './rooms.js';
@@ -118,6 +118,13 @@ export function tickZombie(w, z) {
   if (victim) {
     face(z, victim);
     if (z.attackCd <= 0) zombieAttack(w, z, victim);
+    return;
+  }
+  // Someone hacking at them through the wire is right there: grab back through it.
+  const grab = wireVictim(w, z);
+  if (grab) {
+    face(z, grab);
+    if (z.attackCd <= 0) zombieAttack(w, z, grab, WIRE.grabHit);
     return;
   }
   if (z.state === 'hunt') huntStep(w, z);
@@ -252,10 +259,10 @@ function wanderStep(w, z) {
   if (zWalkable(w, z.x + dx, z.y + dy) && diagOk(w, z.x, z.y, dx, dy)) tryStep(w, z, z.x + dx, z.y + dy);
 }
 
-function zombieAttack(w, z, victim) {
+function zombieAttack(w, z, victim, mult = 1) {
   z.attackCd = ZOMBIE.cooldown;
   z.lunge = w.tick;
-  if (!w.rng.chance(ZOMBIE.hitChance * (victim.downed ? 1.6 : 1))) return;
+  if (!w.rng.chance(ZOMBIE.hitChance * mult * (victim.downed ? 1.6 : 1))) return;
   hurtPawn(w, victim, w.rng.range(...ZOMBIE.damage), z);
 }
 
@@ -266,7 +273,7 @@ function bash(w, z, b) {
   let dmg = w.rng.range(...ZOMBIE.buildingDamage);
   // Fences: a lone straggler just rattles one; it takes a crowd pushing together.
   if (d.fence && w.pawns.filter((o) => o.faction === 'zombie' && dist(o, b) <= 1).length < FENCE.crowd) dmg *= FENCE.loneFactor;
-  if (d.electric && isPowered(w, b)) {
+  if (electrified(w, b)) {
     fx(w, { kind: 'zap', x: b.x, y: b.y });
     z.attackCd += d.electric.stagger;
     hurtPawn(w, z, w.rng.range(...d.electric.damage));
@@ -361,6 +368,9 @@ export function tickCorpses(w) {
 
 export function scanThreat(w, p) {
   const sight = (isNight(w.tick) ? 8 : SURVIVOR.sight) + postBonus(w, p, 'sightBonus');
+  // Inside the secure yard, the dead on the far side of the wire aren't a threat, only a target
+  // for anyone who can hit them through it. People keep working; the fence does its job.
+  const ignored = (z) => fencedOut(w, p, z) && !throughWire(w, p, z);
   let best = null, bestD = Infinity;
   for (const z of w.pawns) {
     if (z.faction !== 'zombie') continue;
@@ -369,21 +379,111 @@ export function scanThreat(w, p) {
     // At night, zombies standing in a floodlight's pool can be seen from much farther.
     if (d > sight && !(isNight(w.tick) && d <= 18 && litByFloodlight(w, z.x, z.y))) continue;
     if (d > 1 && !canSee(w, p.x, p.y, z.x, z.y)) continue;
+    if (ignored(z)) continue;
     best = z;
     bestD = d;
   }
-  if (!best && p.heard && w.tick - p.heard.tick < 300 && !p.heard.z.gone) best = p.heard.z;
+  if (!best && p.heard && w.tick - p.heard.tick < 300 && !p.heard.z.gone && !ignored(p.heard.z)) best = p.heard.z;
   return best;
 }
 
-function meleeAttack(w, a, target) {
+// Can `p` hurt a fenced-out zombie from inside the yard? Shooters in range can, and so can a
+// blade if there's a free spot to hack at it through the wire.
+function throughWire(w, p, z) {
+  if (!canFight(p) || p.hp < p.maxHp * SURVIVOR.fleeBelow) return false;
+  if (canShoot(p)) return dist(p, z) <= weaponOf(p).range + postBonus(w, p, 'rangeBonus');
+  return hasBlade(p) && !!hackSpot(w, p, z);
+}
+
+// ---- Hacking through the wire (DESIGN §4) -----------------------------------
+// A blade reaches a zombie exactly 2 cells away in a straight line (orthogonal or diagonal)
+// when the cell between is a see-through barrier. The dead grab back along the same line.
+
+const hasBlade = (p) => !!p.weapon && !!THINGS[p.weapon.def].weapon.melee; // fists and empty guns can't reach
+const electrified = (w, b) => !!THINGS[b.def].electric && isPowered(w, b) && modeAllows(w, b);
+// A barrier you can reach through: chain-link, gates, barricades; an electric fence only when it's dead.
+function reachThroughAt(w, x, y) {
+  const b = buildingAt(w, x, y);
+  return !!b && !!THINGS[b.def].reachThrough && !electrified(w, b);
+}
+// If a and b are 2 apart in a straight line with a reach-through barrier between, the barrier cell.
+function wireBetween(w, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) !== 2 || (dx && Math.abs(dx) !== 2) || (dy && Math.abs(dy) !== 2)) return null;
+  const m = { x: a.x + dx / 2, y: a.y + dy / 2 };
+  return reachThroughAt(w, m.x, m.y) ? m : null;
+}
+function wireVictim(w, z) {
+  for (const p of w.humans) if (!p.gone && !p.downed && wireBetween(w, z, p)) return p;
+  return null;
+}
+// The nearest free cell inside the yard to hack `z` from (2 in line with it, across the barrier).
+function hackSpot(w, p, z) {
+  let best = null, bestD = Infinity;
+  for (const [dx, dy] of DIRS) {
+    const s = { x: z.x + 2 * dx, y: z.y + 2 * dy };
+    if (!inBounds(w, s.x, s.y) || !inYard(w, s) || !passable(w, s.x, s.y) || !reachThroughAt(w, z.x + dx, z.y + dy)) continue;
+    if ((s.x !== p.x || s.y !== p.y) && (reservedByOther(w, ckey(w, s.x, s.y), p) || w.pawns.some((o) => o !== p && o.x === s.x && o.y === s.y))) continue;
+    const d = dist(p, s);
+    if (d < bestD && canReach(w, p, s.x, s.y, false)) { best = s; bestD = d; }
+  }
+  return best;
+}
+
+// Go stand at the wire and hack at the dead through it. Quiet (melee noise only); the risk is
+// the grab back, and a crowd at one section tears it down (the fence crowd rule).
+export function hackJob(w, p, z, spot) {
+  return {
+    def: 'hack', kind: 'combat', report: 'hacking through the wire', target: z, cell: spot,
+    reserve: [ckey(w, spot.x, spot.y)],
+    toils: [goTo((j) => j.cell, false), {
+      tick(w, p, j) {
+        if (p.hp < p.maxHp * SURVIVOR.fleeBelow) return FAIL;
+        if (!hasBlade(p)) return DONE;
+        let z = j.target;
+        if (z.gone || !wireBetween(w, p, z)) z = w.pawns.find((o) => o.faction === 'zombie' && wireBetween(w, p, o)) ?? null; // next one in reach
+        if (!z) return (w.tick + p.id) % 90 === 0 ? DONE : undefined; // linger a moment, then rethink
+        j.target = z;
+        face(p, z);
+        if (p.attackCd <= 0) meleeAttack(w, p, z, WIRE.reachHit);
+      },
+    }],
+  };
+}
+
+// Alarm, for blades: take a spot on the wire, the nearest one to the dead if they're out there.
+export function wireJob(w, p) {
+  if (!hasBlade(p) || !inYard(w, p)) return null;
+  const hunters = w.pawns.filter((z) => z.faction === 'zombie' && z.state === 'hunt');
+  const toward = hunters.length ? hunters.reduce((a, b) => (dist(p, a) <= dist(p, b) ? a : b)) : p;
+  let best = null, bestD = Infinity;
+  for (let y = Math.max(0, p.y - 24); y <= Math.min(w.h - 1, p.y + 24); y++) for (let x = Math.max(0, p.x - 24); x <= Math.min(w.w - 1, p.x + 24); x++) {
+    const c = { x, y };
+    if (!inYard(w, c) || !passable(w, x, y) || reservedByOther(w, ckey(w, x, y), p)) continue;
+    // One cell in from the wire: a reach-through barrier next to it, with open ground beyond.
+    const faces = DIRS.some(([dx, dy]) => (!dx || !dy) && reachThroughAt(w, x + dx, y + dy) && inBounds(w, x + 2 * dx, y + 2 * dy) && !inYard(w, { x: x + 2 * dx, y: y + 2 * dy }));
+    if (!faces) continue;
+    const d = dist(toward, c) * 2 + dist(p, c);
+    if (d < bestD && canReach(w, p, x, y, false)) { best = c; bestD = d; }
+  }
+  if (!best) return null;
+  return {
+    def: 'holdWire', kind: 'guard', report: 'holding the wire', cell: best, reserve: [ckey(w, best.x, best.y)],
+    toils: [goTo((j) => j.cell, false), wait(900, (w) => (w.alarm ? undefined : DONE))],
+  };
+}
+
+// A Supply runner only backs off from the dead that can actually reach them.
+export const runnerDanger = (w, p) => w.pawns.find((z) => z.faction === 'zombie' && dist(z, p) <= 3 && !fencedOut(w, p, z)) ?? null;
+
+function meleeAttack(w, a, target, mult = 1) {
   const wpn = weaponOf(a).melee ? weaponOf(a) : UNARMED; // a gun with no ammo is a club
   a.attackCd = wpn.cooldown;
   a.lunge = w.tick;
   const lvl = a.skills.melee?.level ?? 0;
   learn(a, 'melee', 25);
   makeNoise(w, a.x, a.y, 6);
-  if (!w.rng.chance(Math.min(0.95, 0.62 + 0.017 * lvl))) return;
+  if (!w.rng.chance(Math.min(0.95, 0.62 + 0.017 * lvl) * mult)) return;
   hurtPawn(w, target, w.rng.range(...wpn.damage) * (1 + 0.04 * lvl) * traitMult(a, 'meleeDamage'), a);
 }
 
@@ -416,6 +516,11 @@ export function tickTurrets(w) {
     if (!best) continue;
     t.cd = tu.cooldown;
     t.ammo--;
+    // Out of rounds mid-horde: one letter per turret per horde, so runners (and you) know where.
+    if (t.ammo <= 0 && w.story?.hordeActive && t.dryHorde !== w.story.hordeId) {
+      t.dryHorde = w.story.hordeId;
+      letter(w, `The ${compass(w, t)} turret is out of rounds.`, 'bad', t);
+    }
     t.aim = Math.atan2(best.y - t.y, best.x - t.x);
     t.lastShot = w.tick;
     makeNoise(w, t.x, t.y, tu.noise);
@@ -455,7 +560,7 @@ export function fightJob(w, p, z) {
           }
           if (post && !p.move) return DONE; // hold the tower; don't chase
           if (d > range + 10) return DONE;
-          if ((w.tick + p.id) % 60 === 0 && d <= 2 && outnumbered(w, p, z)) return FAIL;
+          if ((w.tick + p.id) % 60 === 0 && d <= 2 && !fencedOut(w, p, z) && outnumbered(w, p, z)) return FAIL;
         } else {
           if (d <= 1 && !p.move) {
             face(p, z);
@@ -465,6 +570,7 @@ export function fightJob(w, p, z) {
           if (d > SURVIVOR.sight + 4) return DONE;
           if ((w.tick + p.id) % 60 === 0 && outnumbered(w, p, z)) return FAIL; // more arrived: fall back
         }
+        if (!p.move && fencedOut(w, p, z)) return DONE; // hold the wire: nobody opens the gate to chase
         if (!p.move) {
           const path = findPath(w, p.x, p.y, { x: z.x, y: z.y, touch: true });
           if (!path) return FAIL;
@@ -512,6 +618,14 @@ export function threatResponse(w, p, z) {
   // Cornered: anyone willing to fight swings back at whatever is on them, odds be damned.
   const onMe = !isGentle(p) && w.pawns.find((o) => o.faction === 'zombie' && dist(o, p) <= 1);
   if (onMe) return fightJob(w, p, onMe);
+  // Behind the wire: shoot it if you can, otherwise let the fence hold it. Nobody flees a fence.
+  if (fencedOut(w, p, z)) {
+    if (!throughWire(w, p, z)) return null;
+    if (canShoot(p)) return fightJob(w, p, z);
+    const spot = hackSpot(w, p, z);
+    return spot ? hackJob(w, p, z, spot) : null;
+  }
+  if (isRunner(p)) { const near = runnerDanger(w, p); return near ? fleeJob(w, p, near) : null; }
   if (canFight(p) && p.hp >= p.maxHp * SURVIVOR.fleeBelow) {
     if (canShoot(p)) {
       // Shooters hold at range even against a crowd; they only fall back when it gets close.

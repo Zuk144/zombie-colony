@@ -322,6 +322,33 @@ export function releaseAll(w, p) {
 // ---- Colony-level helpers -------------------------------------------------
 
 export const colonists = (w) => w.pawns.filter((p) => p.faction === 'colony');
+// Inside the secure yard (see perimeter.js): a cell zombies can't reach without breaking in.
+// A building (a turret, a generator) sits on a blocked cell, so it counts as inside when you
+// can stand next to it from inside.
+export function inYard(w, t) {
+  if (w.secure[t.y * w.w + t.x] === 1) return true;
+  if (!t.def || THINGS[t.def].kind !== 'building') return false;
+  const [sw, sh] = sizeOf(t);
+  for (let y = t.y - 1; y <= t.y + sh; y++) for (let x = t.x - 1; x <= t.x + sw; x++) {
+    if (x >= t.x && x < t.x + sw && y >= t.y && y < t.y + sh) continue;
+    if (inBounds(w, x, y) && w.secure[y * w.w + x] === 1) return true;
+  }
+  return false;
+}
+// Fenced out: `a` is inside the yard and `b` isn't, so there's wire between them.
+export const fencedOut = (w, a, b) => inYard(w, a) && !inYard(w, b);
+// "east", "north-west", …: where `t` sits relative to the colony's middle (for letters).
+export function compass(w, t) {
+  const cs = colonists(w);
+  if (!cs.length) return '';
+  const cx = cs.reduce((s, p) => s + p.x, 0) / cs.length, cy = cs.reduce((s, p) => s + p.y, 0) / cs.length;
+  const dx = t.x - cx, dy = t.y - cy;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < 3) return 'middle';
+  const ns = dy < 0 ? 'north' : 'south', ew = dx < 0 ? 'west' : 'east';
+  if (Math.abs(dx) > 2 * Math.abs(dy)) return ew;
+  if (Math.abs(dy) > 2 * Math.abs(dx)) return ns;
+  return `${ns}-${ew}`;
+}
 export const pawnById = (w, id) => w.pawns.find((p) => p.id === id) ?? null;
 export const zombies = (w) => w.pawns.filter((p) => p.faction === 'zombie');
 

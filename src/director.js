@@ -143,6 +143,7 @@ function horde(w, points, text) {
   w.fieldDirty = true;
   if (placed >= 3) {
     w.story.hordeActive = true;
+    w.story.hordeId = (w.story.hordeId ?? 0) + 1;
     if (w.autoAlarm) setAlarm(w, true);
   }
   const side = origin.x === 0 ? 'west' : origin.x === w.w - 1 ? 'east' : origin.y === 0 ? 'north' : 'south';

@@ -109,10 +109,10 @@ export function createUI(w, r) {
     ok: (x, y) => inBounds(w, x, y) && w.roofArea[idx(w, x, y)] !== value,
     apply: (cells) => { for (const [x, y] of cells) w.roofArea[idx(w, x, y)] = value; },
   });
-  const zone = (type) => ({
+  const zone = (type, preset = null) => ({
     shape: 'rect',
     ok: (x, y) => inBounds(w, x, y) && !w.zoneAt[idx(w, x, y)] && passable(w, x, y) && !terrainAt(w, x, y).noZone && (type !== 'grow' || terrainAt(w, x, y).fertility >= 0.5),
-    apply: (cells) => { const z = addZoneCells(w, type, cells); if (z) ui.selected = { zone: z }; },
+    apply: (cells) => { const z = addZoneCells(w, type, cells, preset); if (z) ui.selected = { zone: z }; },
   });
 
   const CATEGORIES = [
@@ -130,6 +130,7 @@ export function createUI(w, r) {
     { key: 'furnish', label: 'Furnish', icon: 'bed', tools: ['bed', 'table', 'campfire', 'woodStove', 'workbench', 'burnPit'].map(build) },
     { key: 'zones', label: 'Zones', icon: 'zones', tools: [
       { key: 'zone:stockpile', label: 'Stockpile', icon: 'stockpile', hotkey: 'z', hint: 'Drag an area. Haulers bring items here.', ...zone('stockpile') },
+      { key: 'zone:cache', label: 'Ammo cache', icon: 'crate', hint: 'A small stockpile for rounds and fuel. Put it near the guns: haulers fill it in quiet times, runners grab from it in a fight.', ...zone('stockpile', 'cache') },
       { key: 'zone:grow', label: 'Grow', icon: 'grow', hotkey: 'g', hint: 'Drag over soil. Growers sow and harvest here. Pick the crop in the inspector.', ...zone('grow') },
       { key: 'zone:shelter', label: 'Shelter', icon: 'shelter', hint: 'Where survivors set to Flee run when zombies appear or the alarm sounds. Put it behind walls.', ...zone('shelter') },
       { key: 'zone:remove', label: 'Remove', icon: 'eraser', hint: 'Drag to erase zones.', shape: 'rect', ok: (x, y) => inBounds(w, x, y) && !!w.zoneAt[idx(w, x, y)], apply: (cells) => removeZoneCells(w, cells) },
@@ -325,7 +326,7 @@ export function createUI(w, r) {
 
   function toggleAlarm() {
     setAlarm(w, !w.alarm);
-    letter(w, w.alarm ? 'Alarm raised: fighters to the watchtowers, everyone else to shelter.' : 'Alarm lifted. Back to work.', w.alarm ? 'bad' : 'neutral');
+    letter(w, w.alarm ? 'Alarm raised: guns to the towers, blades to the wire, runners to the guns, everyone else to shelter.' : 'Alarm lifted. Back to work.', w.alarm ? 'bad' : 'neutral');
   }
   $('alarm').addEventListener('click', toggleAlarm);
 
@@ -378,10 +379,14 @@ export function createUI(w, r) {
     $('workSheet').innerHTML = `<div class="sheet-card">${head}${ui.workTab === 'schedule' ? scheduleHTML() : prioritiesHTML()}</div>`;
   }
 
+  // Response: what a survivor does when the dead come. Gentle survivors can't fight, but they can run supplies.
+  const RESP = { fight: ['sword', 'Fight'], supply: ['crate', 'Supply'], flee: ['run', 'Flee'] };
+  const nextResp = (p) => (isGentle(p) ? (p.response === 'supply' ? 'flee' : 'supply') : { fight: 'supply', supply: 'flee', flee: 'fight' }[p.response] ?? 'fight');
+  const respBtn = (p, attrs) => { const [ic, l] = RESP[p.response] ?? RESP.flee; return `<button class="resp ${p.response}" ${attrs}>${icon(ic)}<span>${l}</span></button>`; };
+
   function prioritiesHTML() {
     const rows = colonists(w).map((p) => {
-      const gentle = isGentle(p);
-      const resp = `<td><button class="resp ${p.response}" data-resp="${p.id}" ${gentle ? 'disabled title="Gentle: never fights"' : ''}>${icon(p.response === 'fight' ? 'sword' : 'run')}<span>${p.response === 'fight' ? 'Fight' : 'Flee'}</span></button></td>`;
+      const resp = `<td>${respBtn(p, `data-resp="${p.id}"${isGentle(p) ? ' title="Gentle: never fights, but can run supplies"' : ''}`)}</td>`;
       const cells = WORK_TYPES.map((t) => {
         if (p.incapable.has(t.key)) return '<td class="incapable">—</td>';
         const v = p.priorities[t.key];
@@ -391,7 +396,7 @@ export function createUI(w, r) {
       return `<tr><th>${esc(p.name)}</th>${resp}${cells}</tr>`;
     }).join('');
     return `<p class="hint">Tap a number to cycle 1 → 4 → off. 1 is done first; at equal priority the leftmost column wins.
-      <b>Response</b> decides what a survivor does when they see zombies: Fight, or Flee to a Shelter zone.</p>
+      <b>Response</b> is what a survivor does when the dead come: <b>Fight</b> them, <b>Supply</b> (keep the guns fed and the generator running), or <b>Flee</b> to a Shelter zone.</p>
       <div class="table-wrap"><table><thead><tr><th></th><th>Response</th>${WORK_TYPES.map((t) => `<th>${t.label}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
@@ -439,7 +444,7 @@ export function createUI(w, r) {
     if (!b) return;
     const p = w.pawns.find((p) => p.id === +(b.dataset.pawn ?? b.dataset.resp));
     if (!p) return;
-    if (b.dataset.resp) p.response = p.response === 'fight' ? 'flee' : 'fight';
+    if (b.dataset.resp) p.response = nextResp(p);
     else p.priorities[b.dataset.work] = (p.priorities[b.dataset.work] + 1) % 5;
     renderWork();
   });
@@ -511,7 +516,7 @@ export function createUI(w, r) {
     const t = s?.thing;
     if (act === 'close') ui.selected = null;
     else if (act === 'jump' && s) { const o = s.pawn ?? s.thing; if (o) jumpTo(o.x, o.y); }
-    else if (act === 'resp' && s?.pawn) s.pawn.response = s.pawn.response === 'fight' ? 'flee' : 'fight';
+    else if (act === 'resp' && s?.pawn) s.pawn.response = nextResp(s.pawn);
     else if (act === 'designate' && t) t.designation = b.dataset.kind;
     else if (act === 'clear' && t) t.designation = null;
     else if (act === 'cancelBp' && t) cancelAt(t.x, t.y);
@@ -602,7 +607,7 @@ export function createUI(w, r) {
       <div class="need"><span>Rest</span>${bar(p.needs.rest)}<em>${pct(p.needs.rest)}</em></div>
       <div class="need"><span>Recreation</span>${bar(p.needs.joy)}<em>${pct(p.needs.joy)}</em></div>
       <div class="row"><span>${icon(wpn?.weapon.ranged ? 'gun' : 'blade')} ${esc(weapon)}</span></div>
-      <div class="row"><span>When zombies appear</span><button class="resp ${p.response}" data-act="resp" ${gentle ? 'disabled' : ''}>${icon(p.response === 'fight' ? 'sword' : 'run')}<span>${p.response === 'fight' ? 'Fight' : 'Flee'}</span></button></div>
+      <div class="row"><span>When the dead come</span>${respBtn(p, 'data-act="resp"')}</div>
       <h4>Thoughts</h4><ul class="thoughts">${thoughts}</ul>
       <h4>Skills</h4><ul class="skills">${skills}</ul>
       ${p.incapable.size ? `<p class="warn">Won’t do: ${[...p.incapable].map((k) => WORK_TYPES.find((t) => t.key === k).label).join(', ')}</p>` : ''}`;
@@ -617,12 +622,13 @@ export function createUI(w, r) {
       return head(z.label, `${z.cells.size} cells`) + season + `<h4>Crop</h4><div class="chips">${crops}</div>
         <p class="hint">Rice is food (cook it into meals). Medicinal herbs become herbal medicine for your doctors. Crops need open sky and warmth.</p>`;
     }
-    if (z.type === 'shelter') return head(z.label, `${z.cells.size} cells`) + `<p class="hint">Survivors set to <b>Flee</b> (and anyone badly hurt) run here when zombies show up, and everyone who isn't fighting waits here during an alarm. Keep it behind walls.</p>`;
+    if (z.type === 'shelter') return head(z.label, `${z.cells.size} cells`) + `<p class="hint">Survivors set to <b>Flee</b> (and anyone badly hurt) run here when zombies show up, and everyone who isn't fighting or running supplies waits here during an alarm. Keep it behind walls.</p>`;
+    const cacheHint = z.preset === 'cache' ? '<p class="hint">An ammo cache: haulers fill it in quiet times, and runners on <b>Supply</b> grab from it in a fight. Keep it close to the guns, behind the wire.</p>' : '';
     const items = Object.keys(THINGS).filter((k) => THINGS[k].kind === 'item');
     return head(z.label, `${z.cells.size} cells`) + `
       <div class="row"><span>Priority</span><button class="round" data-act="prio" data-dir="-1">‹</button><b class="prio-label">${STOCK_PRIORITIES[z.priority - 1]}</b><button class="round" data-act="prio" data-dir="1">›</button></div>
       <h4>Allowed</h4><div class="chips">${items.map((k) => `<button data-act="allow" data-def="${k}" class="${z.allow.has(k) ? 'on' : ''}">${THINGS[k].label}</button>`).join('')}</div>
-      <p class="hint">Haulers move items up to higher-priority stockpiles. Bodies go to a burn pit if you have one.</p>`;
+      <p class="hint">Haulers move items up to higher-priority stockpiles. Bodies go to a burn pit if you have one.</p>${cacheHint}`;
   }
 
   function actions(t) {

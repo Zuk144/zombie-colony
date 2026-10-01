@@ -40,6 +40,7 @@ export const THOUGHTS = {
   colonistDied: { label: 'A survivor died', mood: -8, days: 6, stack: 5 },
   sawTurn: { label: 'Watched a friend turn', mood: -12, days: 5, stack: 3 },
   survivedAttack: { label: 'We held them off', mood: 4, days: 1, stack: 1 },
+  keptGunsFed: { label: 'Kept the guns fed', mood: 6, days: 2, stack: 1 },
   beatInfection: { label: 'Beat the infection', mood: 12, days: 4, stack: 1 },
   // Temperature & rooms (RW-style)
   cold: { label: 'Cold', mood: -5 },

@@ -83,6 +83,9 @@ export const ROOMS = { maxCells: 400, maxAutoRoof: 160, supportRange: 6, enclose
 export const POWER = { poleRange: 6, poleLink: 8, dayStart: 6, dayEnd: 19 };
 // Fewer than 3 attackers barely dent a fence (a lone straggler needs ~2 days); its rattling draws friends.
 export const FENCE = { crowd: 3, loneFactor: 0.03 };
+// Hacking through the wire (DESIGN §4): blades reach across a see-through barrier, and the dead
+// grab back. Multipliers on the normal melee hit chances.
+export const WIRE = { reachHit: 0.8, grabHit: 0.5 };
 // The Din: total machine noise → more strays and bigger hordes.
 export const DIN = { levels: [[0, 'Quiet'], [10, 'Humming'], [30, 'Loud'], [60, 'Deafening']], hordeMax: 0.6, hordePer: 1 / 100, strayPer: 1 / 40 };
 
